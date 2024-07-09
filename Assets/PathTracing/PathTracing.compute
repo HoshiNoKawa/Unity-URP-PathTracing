@@ -1,0 +1,179 @@
+#pragma kernel CSMain
+
+#pragma multi_compile __ USE_SKYBOX
+#pragma multi_compile __ USE_RR
+
+#include "PathTracingUtils.hlsl"
+
+RWTexture2D<float4> Result;
+TextureCube _SkyBoxTexture;
+SamplerState sampler_SkyBoxTexture;
+
+int _frameCount;
+int _cameraType;
+int _useSkybox;
+float3 _skyColor;
+int _bouncesCount;
+float _RR;
+
+StructuredBuffer<Sphere> SphereBuffer;
+StructuredBuffer<float3> VertexBuffer;
+StructuredBuffer<float3> NormalBuffer;
+StructuredBuffer<int> IndexBuffer;
+StructuredBuffer<Mesh> MeshBuffer;
+RWStructuredBuffer<int> SampleCountBuffer;
+
+void TraceRay(Ray ray, inout HitPayload payload)
+{
+    uint listCount, stride;
+
+    SphereBuffer.GetDimensions(listCount, stride);
+
+    for (uint j = 0; j < listCount; j++)
+    {
+        Sphere sphere = SphereBuffer[j];
+        float t = SphereIntersection(sphere, ray);
+        if (t < payload.closestT)
+        {
+            payload.closestT = t;
+            payload.position = ray.origin + t * ray.direction;
+            payload.normal = normalize(payload.position - sphere.center);
+            payload.mat = sphere.mat;
+            // payload.inside = false;
+        }
+    }
+
+    MeshBuffer.GetDimensions(listCount, stride);
+
+    for (uint k = 0; k < listCount; k++)
+    {
+        Mesh mesh = MeshBuffer[k];
+
+        Ray transRay = RayWorldToObject(ray, mesh.nM);
+        if (mesh.withoutBV || AABBIntersection(mesh.AABBMin, mesh.AABBMax, transRay))
+        // if (AABBIntersection(AABBObjectToWorld(mesh.AABBMin, mesh.M), AABBObjectToWorld(mesh.AABBMax, mesh.M), ray))
+        {
+            for (uint z = mesh.triangleIndexBegin; z < mesh.triangleIndexEnd; z += 3)
+            {
+                // int triIndex = mesh.firstTriangleIndex + z;
+                // Triangle tri = TriangleBuffer[triIndex];
+                uint3 indices = uint3(IndexBuffer[z], IndexBuffer[z + 1], IndexBuffer[z + 2]) + mesh.preVertexCount;
+
+                Triangle tri = {
+                    VertexBuffer[indices.x], VertexBuffer[indices.y], VertexBuffer[indices.z], NormalBuffer[indices.x],
+                    NormalBuffer[indices.y], NormalBuffer[indices.z]
+                };
+
+                TriObjectToWorld(tri, mesh.M, mesh.nM);
+                TriangleIntersection(tri, ray, payload, mesh.mat, mesh.M, mesh.nM);
+            }
+        }
+    }
+}
+
+float3 Shade(Ray ray, uint2 id, uint width, uint height)
+{
+    float3 col = 0;
+    float3 contribution = 1.0;
+
+    uint bounces = _bouncesCount;
+    uint stride = width * height * bounces;
+
+    uint seed = (id.y * width + id.x) * bounces;
+    seed += (_frameCount - 1) * stride;
+
+    #ifdef USE_RR
+    uint i = 0;
+    while(true)
+    #else
+    for (uint i = 0; i < bounces; i++)
+    #endif
+    {
+        seed += i;
+        seed *= PCG_Hash(seed);
+
+        #ifdef USE_RR
+        float rand = RandomFloat(seed);
+        if (rand < _RR)
+        {
+        #endif
+
+        HitPayload payload = CreateHitPayload();
+        TraceRay(ray, payload);
+
+        if (payload.closestT < FLT_MAX)
+        {
+            if (payload.mat.enableEmission)
+            {
+                col += payload.mat.emissionColor * contribution;
+                break;
+            }
+
+            float3 v = -ray.direction;
+
+            float mis = MultipleImportanceSample(seed, v, payload.normal, payload.mat, ray.direction);
+
+            float3 bsdf = DisneyBSDF(payload.normal, v, ray.direction, payload.mat) * max(0, mis);
+
+            contribution *= bsdf;
+
+
+            // float nv = dot(payload.normal, v);
+            float nl = dot(payload.normal, ray.direction);
+            // float lv = dot(ray.direction, v);
+            // float nh = dot(payload.normal, h);
+            // float hl = dot(h, ray.direction);
+
+            float bias = nl < 0 ? -1e-4 : 1e-4;
+            ray.origin = payload.position + payload.normal * bias;
+        }
+        else
+        {
+            #ifdef USE_SKYBOX
+            col += _SkyBoxTexture.SampleLevel(sampler_SkyBoxTexture, ray.direction, 0).rgb * contribution;
+            #else
+            col += _skyColor * contribution;
+            #endif
+            break;
+        }
+        #ifdef USE_RR
+        }
+        else
+        {
+            col /= _RR;
+            break;
+        }
+        i++;
+        #endif
+    }
+
+    return col;
+}
+
+[numthreads(8,8,1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    uint width, height;
+    Result.GetDimensions(width, height);
+
+    float2 uv = float2((id.xy + float2(0.5f, 0.5f)) / float2(width, height) * 2.0f - 1.0f);
+
+    // float3 col = 0;
+    // for (int i = -1; i < 2; i += 2)
+    // {
+    //     for (int j = -1; j < 2; j += 2)
+    //     {
+    //         Ray ray = CreateRay(uv + float2(float(i) / width, float(j) / height) * 0.25);
+    //         col += Shade(ray, id.xy, width, height);
+    //     }
+    // }
+    // col /= 4.0;
+
+    Ray ray = CreateRay(uv);
+    float3 col = Shade(ray, id.xy, width, height);
+
+    if (_cameraType == 1 && _frameCount > 1)
+        col = lerp(Result[id.xy].rgb, col, 1.0f / _frameCount);
+
+    Result[id.xy] = float4(col, 1);
+}
