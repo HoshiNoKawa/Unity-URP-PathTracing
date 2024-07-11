@@ -13,18 +13,22 @@ public class PathTracingObject : MonoBehaviour
     }
 
     public ObjectType objectType = ObjectType.Mesh;
+    [Space]
     [Range(0f, 1f)] public float specularTransmission = 0.5f;
+    [Range(1f, 2f)] public float indexOfRefraction = 1.5f;
+    [Space]
     [Range(0f, 1f)] public float subsurface = 0.5f;
+    [Space]
     [Range(0f, 1f)] public float specular = 0.5f;
     [Range(0f, 1f)] public float specularTint = 0f;
+    [Space]
     [Range(0f, 1f)] public float anisotropic = 0.5f;
+    [Space]
     [Range(0f, 1f)] public float sheen = 0.5f;
     [Range(0f, 1f)] public float sheenTint = 0f;
+    [Space]
     [Range(0f, 1f)] public float clearcoat = 0.5f;
     [Range(0f, 1f)] public float clearcoatGloss = 0.5f;
-    [Range(1f, 2f)] public float indexOfRefraction = 1.5f;
-    
-    [SerializeField, HideInInspector] int materialObjectID;
 
     private PathTracingManager _pathTracingManager;
     private MeshRenderer _objectRenderer;

@@ -428,6 +428,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   objectType: 1
   specularTransmission: 0.034
+  indexOfRefraction: 1.5
   subsurface: 0.5
   specular: 1
   specularTint: 0
@@ -436,8 +437,6 @@ MonoBehaviour:
   sheenTint: 0
   clearcoat: 1
   clearcoatGloss: 1
-  indexOfRefraction: 1.5
-  materialObjectID: 39298
 --- !u!64 &352978292
 MeshCollider:
   m_ObjectHideFlags: 0
@@ -783,7 +782,7 @@ GameObject:
   - component: {fileID: 495908859}
   - component: {fileID: 495908858}
   m_Layer: 0
-  m_Name: Sphere
+  m_Name: Big Sphere
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -818,6 +817,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   objectType: 0
   specularTransmission: 1
+  indexOfRefraction: 1.807
   subsurface: 0
   specular: 0
   specularTint: 0
@@ -826,8 +826,6 @@ MonoBehaviour:
   sheenTint: 0
   clearcoat: 0
   clearcoatGloss: 1
-  indexOfRefraction: 1.807
-  materialObjectID: 39320
 --- !u!135 &495908859
 SphereCollider:
   m_ObjectHideFlags: 0
@@ -915,7 +913,7 @@ GameObject:
   - component: {fileID: 503593764}
   - component: {fileID: 503593763}
   m_Layer: 0
-  m_Name: Sphere (1)
+  m_Name: Small Sphere
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -950,6 +948,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   objectType: 0
   specularTransmission: 0
+  indexOfRefraction: 1.5
   subsurface: 0.648
   specular: 0.212
   specularTint: 0
@@ -958,8 +957,6 @@ MonoBehaviour:
   sheenTint: 0
   clearcoat: 0
   clearcoatGloss: 0.004
-  indexOfRefraction: 1.5
-  materialObjectID: 39332
 --- !u!135 &503593764
 SphereCollider:
   m_ObjectHideFlags: 0
@@ -1411,11 +1408,15 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   rayTracingShader: {fileID: 7200000, guid: 56e1d06308cd2e0469e09e674af49ffe, type: 3}
+  enablePathTracing: 1
   useSkybox: 0
   skyColor: {r: 0, g: 0, b: 0, a: 0}
   maxBouncesCount: 10
   useRussianRoulette: 0
   russianRouletteProbability: 0.9
+  useCameraController: 1
+  moveSpeed: 5
+  rotationSpeed: 3
 --- !u!21 &1593702435
 Material:
   serializedVersion: 8
@@ -1605,6 +1606,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   objectType: 1
   specularTransmission: 0
+  indexOfRefraction: 1.5
   subsurface: 1
   specular: 0.569
   specularTint: 0
@@ -1613,8 +1615,6 @@ MonoBehaviour:
   sheenTint: 0
   clearcoat: 0.153
   clearcoatGloss: 0.133
-  indexOfRefraction: 1.5
-  materialObjectID: 39360
 --- !u!65 &1676745489
 BoxCollider:
   m_ObjectHideFlags: 0
@@ -1793,6 +1793,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   objectType: 1
   specularTransmission: 0
+  indexOfRefraction: 1.5
   subsurface: 0
   specular: 0.083
   specularTint: 0
@@ -1801,8 +1802,6 @@ MonoBehaviour:
   sheenTint: 0
   clearcoat: 0.698
   clearcoatGloss: 0.777
-  indexOfRefraction: 1.5
-  materialObjectID: -10602
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

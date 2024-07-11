@@ -59,9 +59,11 @@ public class PathTracingManager : MonoBehaviour
 
     public static bool EnablePathTracing = true;
     public bool enablePathTracing = true;
+    
     [Header("Sky Settings")]
     public bool useSkybox = true;
     public Color skyColor = new Color(0.6f, 0.7f, 0.9f);
+    
     [Header("Stop Condition")]
     [UnityEngine.Range(1, 20)] public int maxBouncesCount = 5;
     public bool useRussianRoulette = false;
@@ -301,7 +303,7 @@ public class PathTracingManager : MonoBehaviour
 
     private void ControlCamera()
     {
-        if (Input.GetMouseButton(1)) // 右键按下时启用旋转
+        if (Input.GetMouseButton(1))
         {
             rotationX += Input.GetAxis("Mouse X") * rotationSpeed;
             rotationY -= Input.GetAxis("Mouse Y") * rotationSpeed;
@@ -317,17 +319,16 @@ public class PathTracingManager : MonoBehaviour
         float moveRight = Input.GetAxis("Horizontal") * moveSpeed * Time.deltaTime;
         float moveUp = 0;
 
-        if (Input.GetKey(KeyCode.E)) // 按 E 升高
+        if (Input.GetKey(KeyCode.E))
         {
             moveUp = moveSpeed * 0.8f * Time.deltaTime;
         }
 
-        if (Input.GetKey(KeyCode.Q)) // 按 Q 降低
+        if (Input.GetKey(KeyCode.Q))
         {
             moveUp = -moveSpeed * 0.8f * Time.deltaTime;
         }
 
-        // 计算移动
         Vector3 moveDirection =
             (_mainCamera.forward * moveForward) + (_mainCamera.right * moveRight) + (_mainCamera.up * moveUp);
         _mainCamera.position += moveDirection;
@@ -357,7 +358,7 @@ public class PathTracingManager : MonoBehaviour
     }
 }
 
-#region oldCode
+#region deprecatedCode
 
 /*
 {
