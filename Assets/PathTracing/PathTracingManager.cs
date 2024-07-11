@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.Serialization;
 
 public class PathTracingManager : MonoBehaviour
 {
@@ -56,19 +57,26 @@ public class PathTracingManager : MonoBehaviour
 
     public ComputeShader rayTracingShader;
 
+    public static bool EnablePathTracing = true;
+    public bool enablePathTracing = true;
+    [Header("Sky Settings")]
     public bool useSkybox = true;
     public Color skyColor = new Color(0.6f, 0.7f, 0.9f);
+    [Header("Stop Condition")]
+    [UnityEngine.Range(1, 20)] public int maxBouncesCount = 5;
     public bool useRussianRoulette = false;
-    [UnityEngine.Range(0f, 0.95f)] public float russianRouletteProbability = 0.9f;
-    [UnityEngine.Range(1, 20)] public int bouncesCount = 5;
+    [UnityEngine.Range(0f, 0.95f)] public float russianRouletteProbability = 0.8f;
+
+    [Header("Camera Control")]
+    public bool useCameraController = true;
+    public float moveSpeed = 5.0f;
+    public float rotationSpeed = 3.0f;
 
     private ComputeBuffer _sphereBuffer;
     private ComputeBuffer _vertexBuffer;
     private ComputeBuffer _normalBuffer;
     private ComputeBuffer _indexBuffer;
     private ComputeBuffer _meshBuffer;
-
-    private ComputeBuffer _sampleCountBuffer;
 
     private List<Sphere> _sphereList;
     private List<Vector3> _vertexList;
@@ -80,8 +88,11 @@ public class PathTracingManager : MonoBehaviour
 
     private int _frameCount;
 
+    private Transform _mainCamera;
+    
+    private float rotationX = 0.0f;
+    private float rotationY = 0.0f;
 
-    // Start is called before the first frame update
     void Start()
     {
         _sphereList = new List<Sphere>();
@@ -92,23 +103,33 @@ public class PathTracingManager : MonoBehaviour
 
         _frameCount = 0;
 
+        if (Camera.main != null)
+        {
+            _mainCamera = Camera.main.transform;
+            Vector3 angles = transform.eulerAngles;
+            rotationX = angles.y;
+            rotationY = angles.x;
+        }
+
         rayTracingShader.SetTexture(0, "_SkyBoxTexture", RenderSettings.skybox.GetTexture("_Tex"));
 
         ResetShaderProperties();
         ResetScene();
     }
 
-    // Update is called once per frame
     void Update()
     {
         rayTracingShader.SetInt("_frameCount", Time.frameCount - _frameCount);
-        ResetScene();
+        // ResetScene();
+        if (useCameraController)
+            ControlCamera();
     }
 
     private void OnValidate()
     {
-        // ResetShaderProperties();
-        // ResetAccumulation();
+        EnablePathTracing = enablePathTracing;
+        ResetShaderProperties();
+        ResetAccumulation();
     }
 
     private void OnDestroy()
@@ -118,7 +139,6 @@ public class PathTracingManager : MonoBehaviour
         _normalBuffer?.Release();
         _indexBuffer?.Release();
         _meshBuffer?.Release();
-        _sampleCountBuffer?.Release();
     }
 
     public void ResetAccumulation()
@@ -137,18 +157,7 @@ public class PathTracingManager : MonoBehaviour
         rayTracingShader.SetVector("_skyColor", ColorToVector(skyColor));
         rayTracingShader.SetKeyword(new LocalKeyword(rayTracingShader, "USE_RR"), useRussianRoulette);
         rayTracingShader.SetFloat("_RR", russianRouletteProbability);
-        rayTracingShader.SetInt("_bouncesCount", bouncesCount);
-        
-        if (_sampleCountBuffer == null || !_sampleCountBuffer.IsValid() || _sampleCountBuffer.count != 2 || _sampleCountBuffer.stride != sizeof(int))
-        {
-            if (_sampleCountBuffer != null)
-                _sampleCountBuffer.Release();
-
-            _sampleCountBuffer = new ComputeBuffer(2, sizeof(int));
-            _sampleCountBuffer.SetData(new int[2] { 0, 0 });
-        }
-        //
-        rayTracingShader.SetBuffer(0, "SampleCountBuffer", _sampleCountBuffer);
+        rayTracingShader.SetInt("_bouncesCount", maxBouncesCount);
     }
 
     public void ResetScene()
@@ -163,7 +172,7 @@ public class PathTracingManager : MonoBehaviour
             {
                 case PathTracingObject.ObjectType.Sphere:
                 {
-                    Material material = child.GetComponent<MeshRenderer>().sharedMaterial;
+                    Material material = properties.GetObjectRenderer().sharedMaterial;
 
                     PathTracingMaterial sphereMat = new PathTracingMaterial()
                     {
@@ -197,8 +206,8 @@ public class PathTracingManager : MonoBehaviour
 
                 case PathTracingObject.ObjectType.Mesh:
                 {
-                    Mesh mesh = child.GetComponent<MeshFilter>().sharedMesh;
-                    Material[] subMaterials = child.GetComponent<MeshRenderer>().sharedMaterials;
+                    Mesh mesh = properties.GetObjectMesh().sharedMesh;
+                    Material[] subMaterials = properties.GetObjectRenderer().sharedMaterials;
                     Matrix4x4 worldMatrix = child.localToWorldMatrix;
                     Matrix4x4 normalWorldMatrix = child.localToWorldMatrix.inverse.transpose;
 
@@ -288,6 +297,43 @@ public class PathTracingManager : MonoBehaviour
             _indexList.Clear();
             _meshList.Clear();
         }
+    }
+
+    private void ControlCamera()
+    {
+        if (Input.GetMouseButton(1)) // 右键按下时启用旋转
+        {
+            rotationX += Input.GetAxis("Mouse X") * rotationSpeed;
+            rotationY -= Input.GetAxis("Mouse Y") * rotationSpeed;
+            rotationY = Mathf.Clamp(rotationY, -89.9f, 89.9f);
+
+            Quaternion rotation = Quaternion.Euler(rotationY, rotationX, 0);
+            if (_mainCamera.rotation != rotation)
+                ResetAccumulation();
+            _mainCamera.rotation = rotation;
+        }
+
+        float moveForward = Input.GetAxis("Vertical") * moveSpeed * Time.deltaTime;
+        float moveRight = Input.GetAxis("Horizontal") * moveSpeed * Time.deltaTime;
+        float moveUp = 0;
+
+        if (Input.GetKey(KeyCode.E)) // 按 E 升高
+        {
+            moveUp = moveSpeed * 0.8f * Time.deltaTime;
+        }
+
+        if (Input.GetKey(KeyCode.Q)) // 按 Q 降低
+        {
+            moveUp = -moveSpeed * 0.8f * Time.deltaTime;
+        }
+
+        // 计算移动
+        Vector3 moveDirection =
+            (_mainCamera.forward * moveForward) + (_mainCamera.right * moveRight) + (_mainCamera.up * moveUp);
+        _mainCamera.position += moveDirection;
+        
+        if (moveDirection.magnitude > 0)
+            ResetAccumulation();
     }
 
     private void CreateStructuredBuffer<T>(ref ComputeBuffer buffer, List<T> data) where T : struct

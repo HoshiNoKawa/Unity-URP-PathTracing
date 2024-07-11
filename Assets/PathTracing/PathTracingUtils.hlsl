@@ -60,9 +60,6 @@ void TriangleIntersection(Triangle tri, Ray ray, inout HitPayload payload, Mater
     if (t > 0.0 && t < payload.closestT)
     {
         payload.closestT = t;
-        // payload.normal = normalize(
-        //     mul(nM, float4(normalize(tri.normal0 * w + tri.normal1 * u + tri.normal2 * v), 0)).xyz);
-        // payload.position = mul(M, float4(ray.origin + t * ray.direction, 1)).xyz;
         payload.normal = normalize(tri.normal0 * w + tri.normal1 * u + tri.normal2 * v);
         payload.position = ray.origin + t * ray.direction;
         payload.mat = mat;
@@ -81,66 +78,6 @@ bool AABBIntersection(float3 AABBMin, float3 AABBMax, Ray ray)
     float t0 = max(tmin.x, max(tmin.y, tmin.z));
 
     return t1 >= t0 ? true : false;
-    // return (t1 >= t0) ? (t0 > 0 ? t0 : t1) : -1.0;
-
-    // float3 dif = AABBMax - AABBMin;
-    // // if (dif.x == 0 || dif.y == 0 || dif.z == 0)
-    //     
-    // float2 T = float2(-FLT_MAX, FLT_MAX);
-    // float2 t[3];
-    //
-    // for (int i = 0; i < 3; i++)
-    // {
-    //     if (ray.direction[i] == 0.0)
-    //     {
-    //         if (ray.origin[i] > AABBMax[i] || ray.origin[i] < AABBMin[i])
-    //             return false;
-    //         else
-    //         {
-    //             t[i].x = -FLT_MAX;
-    //             t[i].y = FLT_MAX;
-    //         }
-    //     }
-    //     else
-    //     {
-    //         t[i].x = (AABBMin[i] - ray.origin[i]) / ray.direction[i];
-    //         t[i].y = (AABBMax[i] - ray.origin[i]) / ray.direction[i];
-    //     }
-    //
-    //     T.x = max(T.x, min(t[i].x, t[i].y));
-    //     T.y = min(T.y, max(t[i].x, t[i].y));
-    // }
-    //
-    // if (T.x >= T.y)
-    //     return false;
-    //
-    // return true;
-}
-
-// Transform
-void TriObjectToWorld(inout Triangle tri, float4x4 M, float4x4 nM)
-{
-    tri.vert0 = mul(M, float4(tri.vert0, 1)).xyz;
-    tri.vert1 = mul(M, float4(tri.vert1, 1)).xyz;
-    tri.vert2 = mul(M, float4(tri.vert2, 1)).xyz;
-
-    tri.normal0 = normalize(mul(nM, float4(tri.normal0, 0)).xyz);
-    tri.normal1 = normalize(mul(nM, float4(tri.normal1, 0)).xyz);
-    tri.normal2 = normalize(mul(nM, float4(tri.normal2, 0)).xyz);
-}
-
-float3 AABBObjectToWorld(float3 aabb, float4x4 M)
-{
-    return mul(M, float4(aabb, 1)).xyz;
-}
-
-Ray RayWorldToObject(Ray ray, float4x4 nMt)
-{
-    Ray transRay;
-    float4x4 nM = transpose(nMt);
-    transRay.origin = mul(nM, float4(ray.origin, 1)).xyz;
-    transRay.direction = normalize(mul(nM, float4(ray.direction, 0)).xyz);
-    return transRay;
 }
 
 // BRDF
@@ -287,13 +224,6 @@ float3 DisneyBSDF(float3 n, float3 v, float3 l, Material mat)
     float3 disney = (1.0 - mat.specularTransmission) * (1.0 - mat.metallic) * f_diffuse + (1.0 - mat.metallic) * mat.
         sheen * f_sheen + (1.0 - mat.specularTransmission * (1.0 - mat.metallic)) * f_metal + 0.25 * mat.clearcoat *
         f_clearCoat + (1.0 - mat.metallic) * mat.specularTransmission * f_glass;
-
-    // float3 disney = (1.0 - mat.metallic) * (f_diffuse + mat.sheen * f_sheen) + f_metal + 0.25 * mat.clearcoat *
-    //     f_clearCoat;
-
-    // float3 disney = (1.0 - mat.specularTransmission) * f_diffuse + mat.specularTransmission * f_glass;
-
-    // float3 disney = f_glass;
 
     // disney *= abs(nl);
     disney = max(0, disney);

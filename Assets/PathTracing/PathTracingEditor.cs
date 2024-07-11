@@ -3,19 +3,20 @@ using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
-[CustomEditor(typeof(PathTracingObject))]
-public class PathTracingSphereEditor : Editor
+[CustomEditor(typeof(PathTracingManager))]
+public class PathTracingManagerEditor : Editor
 {
     public override void OnInspectorGUI()
     {
-        PathTracingObject pathTracingObject = (PathTracingObject)target;
+        PathTracingManager pathTracingManager = (PathTracingManager)target;
 
         DrawDefaultInspector();
+        
+        EditorGUILayout.Space();
 
-        if (GUILayout.Button("Sync with Material"))
+        if (GUILayout.Button("Reset Accumulation"))
         {
-            // pathTracingObject.SyncWithMaterial();
-            pathTracingObject.OnMaterialChanged();
+            pathTracingManager.ResetAccumulation();
         }
     }
 }

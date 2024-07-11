@@ -1,6 +1,7 @@
 ﻿#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Random.hlsl"
 #include "Struct.hlsl"
 
+// Random
 uint PCG_Hash(uint seed)
 {
     uint state = seed * 747796405u * 2891336453u;
@@ -12,6 +13,32 @@ float RandomFloat(inout uint seed)
 {
     seed = PCG_Hash(seed);
     return pow(float(seed) / float(UINT_MAX), 1.0);
+}
+
+// Transform
+void TriObjectToWorld(inout Triangle tri, float4x4 M, float4x4 nM)
+{
+    tri.vert0 = mul(M, float4(tri.vert0, 1)).xyz;
+    tri.vert1 = mul(M, float4(tri.vert1, 1)).xyz;
+    tri.vert2 = mul(M, float4(tri.vert2, 1)).xyz;
+
+    tri.normal0 = normalize(mul(nM, float4(tri.normal0, 0)).xyz);
+    tri.normal1 = normalize(mul(nM, float4(tri.normal1, 0)).xyz);
+    tri.normal2 = normalize(mul(nM, float4(tri.normal2, 0)).xyz);
+}
+
+float3 AABBObjectToWorld(float3 aabb, float4x4 M)
+{
+    return mul(M, float4(aabb, 1)).xyz;
+}
+
+Ray RayWorldToObject(Ray ray, float4x4 nMt)
+{
+    Ray transRay;
+    float4x4 nM = transpose(nMt);
+    transRay.origin = mul(nM, float4(ray.origin, 1)).xyz;
+    transRay.direction = normalize(mul(nM, float4(ray.direction, 0)).xyz);
+    return transRay;
 }
 
 float3 ToWorld(float3 target, float3 normal)
@@ -78,18 +105,6 @@ float DiffusePdf(float3 l, float3 n)
     return dot(n, l) / PI;
 }
 
-float VNDFPdf(float3 h, float3 n, float3 v, float alphag)
-{
-    float nh = dot(n, h);
-    float nv = dot(n, v);
-    float alpha2 = alphag * alphag;
-
-    float D = alpha2 / (PI * pow(nh * nh * (alpha2 - 1.0) + 1.0, 2.0));
-    float G = 2.0 / (1.0 + sqrt(1.0 + alpha2 * (1.0 / (nv * nv) - 1.0)));
-
-    return G * D / (4.0 * nv);
-}
-
 float MetalPdf(float3 h, float3 n, float3 v, float alphag)
 {
     float alpha2 = alphag * alphag;
@@ -112,21 +127,14 @@ float GlassPDF(float3 l, float3 n, float3 v, Material mat)
 {
     float nv = dot(n, v);
     float nl = dot(n, l);
-    // If we are going into the surface, then we use normal eta
-    // (internal/external), otherwise we use external/internal.
     float eta = nv > 0 ? mat.IOR : 1.0 / mat.IOR;
     float3 h = dot(n, v) * dot(n, l) > 0 ? normalize(l + v) : normalize(v + eta * l);
     if (dot(n, h) < 0)
         h = -h;
 
-    // Sample a micro normal and transform it to world space -- this is our half-vector.
-
     float alpha = max(mat.roughness * mat.roughness, 1e-4);
     float alpha2 = alpha * alpha;
 
-    // We sample the visible normals, also we use F to determine
-    // whether to sample reflection or refraction
-    // so PDF ~ F * D * G_in for reflection, PDF ~ (1 - F) * D * G_in for refraction.
     float hv = dot(h, v);
     float F = DielectricFresnel(hv, eta);
     float D = GGXNDF(dot(n, h), alpha2);
@@ -182,67 +190,27 @@ float3 CosineWeightedHemisphereSample(inout uint seed, float3 normal)
     return ToWorld(tangentSpaceDir, normal);
 }
 
-float3 SampleVndf_GGX(inout uint seed, float3 wi, float alpha, float3 n)
-{
-    float2 u = float2(RandomFloat(seed), RandomFloat(seed));
-    // decompose the floattor in parallel and perpendicular components
-    float3 wi_z = n * dot(wi, n);
-    float3 wi_xy = wi - wi_z;
-    // warp to the hemisphere configuration
-    float3 wiStd = normalize(wi_z - alpha * wi_xy);
-    // sample a spherical cap in (-wiStd.z, 1]
-    float wiStd_z = dot(wiStd, n);
-    float phi = (2.0f * u.x - 1.0f) * PI;
-    float z = (1.0f - u.y) * (1.0f + wiStd_z) - wiStd_z;
-    float sinTheta = sqrt(clamp(1.0f - z * z, 0.0f, 1.0f));
-    float x = sinTheta * cos(phi);
-    float y = sinTheta * sin(phi);
-    float3 cStd = float3(x, y, z);
-    // reflect sample to align with normal
-    float3 up = float3(0, 0, 1);
-    float3 wr = n + up;
-    float3 c = dot(wr, cStd) * wr / wr.z - cStd;
-    // compute halfway direction as standard normal
-    float3 wmStd = c + wiStd;
-    float3 wmStd_z = n * dot(n, wmStd);
-    float3 wmStd_xy = wmStd_z - wmStd;
-    // warp back to the ellipsoid configuration
-    float3 wm = normalize(wmStd_z + alpha * wmStd_xy);
-    // return final normal
-    return wm;
-}
-
-
 float3 SampleVisibleNormals(inout uint seed, float3 local_v, float alpha)
 {
     float2 rnd_param = float2(RandomFloat(seed), RandomFloat(seed));
-    // The incoming direction is in the "ellipsodial configuration" in Heitz's paper
     if (local_v.z < 0)
     {
-        // Ensure the input is on top of the surface.
         local_v *= -1;
     }
 
-    // Transform the incoming direction to the "hemisphere configuration".
     float3 hemi_dir_in = normalize(
         float3(alpha * local_v.x, alpha * local_v.y, local_v.z));
 
-    // Parameterization of the projected area of a hemisphere.
-    // First, sample a disk.
     float r = sqrt(rnd_param.x);
     float phi = TWO_PI * rnd_param.y;
     float t1 = r * cos(phi);
     float t2 = r * sin(phi);
-    // Vertically scale the position of a sample to account for the projection.
     float s = (1 + hemi_dir_in.z) / 2;
     t2 = (1 - s) * sqrt(1 - t1 * t1) + s * t2;
-    // Point in the disk space
     float3 disk_N = float3(t1, t2, sqrt(max(0, 1 - t1 * t1 - t2 * t2)));
 
-    // Reprojection onto hemisphere -- we get our sampled normal in hemisphere space.
     float3 hemi_N = ToWorld(disk_N, hemi_dir_in);
 
-    // Transforming the normal back to the ellipsoid configuration
     return normalize(float3(alpha * hemi_N.x, alpha * hemi_N.y, max(0, hemi_N.z)));
 }
 
@@ -273,7 +241,6 @@ float3 GlassSample(inout uint seed, float3 n, float3 v, Material mat, out float3
     float nv = dot(n, v);
     float eta = nv > 0 ? mat.IOR : 1.0 / mat.IOR;
 
-    // Sample a micro normal and transform it to world space -- this is our half-vector.
     float alpha = mat.roughness * mat.roughness;
     float3 local_v = ToLocal(v, n);
     float3 local_h =
@@ -281,42 +248,26 @@ float3 GlassSample(inout uint seed, float3 n, float3 v, Material mat, out float3
 
     h = ToWorld(local_h, n);
 
-    // Flip half-vector if it's below surface
     if (dot(h, n) < 0)
     {
         h = -h;
     }
 
-    // Now we need to decide whether to reflect or refract.
-    // We do this using the Fresnel term.
     float hv = dot(h, v);
     float F = DielectricFresnel(hv, eta);
 
     float u = RandomFloat(seed);
     if (u < F)
     {
-        // Reflection
-        // float3 reflected = normalize(-v + 2 * dot(v, h) * h);
         float3 reflected = reflect(-v, h);
-        // set eta to 0 since we are not transmitting
         return reflected;
     }
     else
     {
-        // float hl_sq = 1 - (1 - hv * hv) / (eta * eta);
-        // // if (hl_sq <= 0)
-        // // {
-        // //     // Total internal reflection
-        // //     // This shouldn't floatly happen, as F will be 1 in this case.
-        // //     return 0;
-        // // }
-        // // flip half_vector if needed
         if (hv < 0)
         {
             h = -h;
         }
-        // float hl = sqrt(hl_sq);
-        // float3 refracted = -v / eta + (abs(hv) / eta - hl) * h;
         float3 refracted = normalize(refract(-v, h, 1 / eta));
         return refracted;
     }
@@ -328,10 +279,6 @@ float MultipleImportanceSample(inout uint seed, float3 v, float3 n, Material mat
 
     float alphag = max(mat.roughness * mat.roughness, 1e-4);
     float alphagc = lerp(0.1, 0.001, mat.clearcoatGloss);
-
-    // float sumWeights = 3.0 - 2.0 * mat.metallic + 0.25 * mat.clearcoat;
-    // float p = 2.0 * (1.0 - mat.metallic) / sumWeights;
-    // float q = (3.0 - 2.0 * mat.metallic) / sumWeights;
 
     if (dot(n, v) < 0)
     {

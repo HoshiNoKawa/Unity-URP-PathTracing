@@ -97,7 +97,7 @@ public class PathTracing : ScriptableRendererFeature
 
     public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
     {
-        if (!Application.isPlaying)
+        if (!(Application.isPlaying && PathTracingManager.EnablePathTracing))
             return;
         renderer.EnqueuePass(_pathTracingPass);
     }

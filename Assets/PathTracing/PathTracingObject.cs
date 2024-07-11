@@ -28,25 +28,37 @@ public class PathTracingObject : MonoBehaviour
 
     private PathTracingManager _pathTracingManager;
     private MeshRenderer _objectRenderer;
+    private MeshFilter _objectMesh;
 
     private void Start()
     {
         _pathTracingManager = transform.parent.GetComponent<PathTracingManager>();
         _objectRenderer = GetComponent<MeshRenderer>();
+        _objectMesh = GetComponent<MeshFilter>();
     }
 
     private void OnValidate()
-    {
-        // SyncToMaterial();
-        // OnMaterialChanged();
-    }
-
-    public void OnMaterialChanged()
     {
         if (_pathTracingManager)
         {
             _pathTracingManager.ResetScene();
             _pathTracingManager.ResetAccumulation();
         }
+    }
+
+    public MeshRenderer GetObjectRenderer()
+    {
+        if(_objectRenderer)
+            return _objectRenderer;
+        _objectRenderer = GetComponent<MeshRenderer>();
+        return _objectRenderer;
+    }
+    
+    public MeshFilter GetObjectMesh()
+    {
+        if(_objectMesh)
+            return _objectMesh;
+        _objectMesh = GetComponent<MeshFilter>();
+        return _objectMesh;
     }
 }

@@ -1413,9 +1413,9 @@ MonoBehaviour:
   rayTracingShader: {fileID: 7200000, guid: 56e1d06308cd2e0469e09e674af49ffe, type: 3}
   useSkybox: 0
   skyColor: {r: 0, g: 0, b: 0, a: 0}
+  maxBouncesCount: 10
   useRussianRoulette: 0
   russianRouletteProbability: 0.9
-  bouncesCount: 10
 --- !u!21 &1593702435
 Material:
   serializedVersion: 8

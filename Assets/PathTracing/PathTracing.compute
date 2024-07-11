@@ -21,7 +21,6 @@ StructuredBuffer<float3> VertexBuffer;
 StructuredBuffer<float3> NormalBuffer;
 StructuredBuffer<int> IndexBuffer;
 StructuredBuffer<Mesh> MeshBuffer;
-RWStructuredBuffer<int> SampleCountBuffer;
 
 void TraceRay(Ray ray, inout HitPayload payload)
 {
