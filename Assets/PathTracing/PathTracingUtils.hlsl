@@ -120,15 +120,16 @@ float3 DisneyDiffuse(float3 l, float3 h, float nl, float nv, Material mat)
 
 float3 DisneyMetal(float3 n, float3 l, float3 v, float3 h, float nv, Material mat, float3 Ctint, float R0)
 {
-    float alphag = max(mat.roughness * mat.roughness, 1e-4);
-    float alpha2 = alphag * alphag;
+    float aspect = sqrt(1.0 - 0.9 * mat.anisotropic);
+    float alphax = max(mat.roughness * mat.roughness / aspect, 1e-4);
+    float alphay = max(mat.roughness * mat.roughness * aspect, 1e-4);
 
     float3 Ks = lerp(1.0, Ctint, mat.specularTint);
     float3 C0 = lerp(mat.specular * R0 * Ks, mat.baseColor, mat.metallic);
 
     float3 Fm = SchlickFresnel(C0, dot(h, l));
-    float Dm = GGXNDF(dot(n, h), alpha2);
-    float Gm = SmithGGXMasking(n, v, alpha2) * SmithGGXMasking(n, l, alpha2);
+    float Dm = GGXNDF(n, h, alphax, alphay);
+    float Gm = SmithGGXMasking(n, v, alphax, alphay) * SmithGGXMasking(n, l, alphax, alphay);
     return Fm * Dm * Gm / (4.0 * abs(nv));
 
     // float3 Fm = lerp(pow(1.0 - hl, 5.0), 1.0, C0);
@@ -143,7 +144,7 @@ float3 DisneyClearCoat(float3 n, float3 l, float3 v, float3 h, float nv, Materia
     float3 Fc = SchlickFresnel(R0, dot(h, l));
     float nh = dot(n, h);
     float Dc = (alpha2c - 1.0) / (PI * log(alpha2c) * (nh * nh * (alpha2c - 1.0) + 1.0));
-    float Gc = SmithGGXMasking(n, v, 0.0625) * SmithGGXMasking(n, l, 0.0625);
+    float Gc = SmithGGXMasking(n, v, 0.25, 0.25) * SmithGGXMasking(n, l, 0.25, 0.25);
     return Fc * Dc * Gc / (4.0 * abs(nv));
 }
 
@@ -155,8 +156,12 @@ float3 DisneySheen(float3 l, float3 h, float nl, Material mat, float3 Ctint)
 
 float3 DisneyGlass(float3 n, float3 l, float3 v, float3 h, float nl, float nv, Material mat)
 {
-    float alphag = max(mat.roughness * mat.roughness, 1e-4);
-    float alpha2 = alphag * alphag;
+    // float alphag = max(mat.roughness * mat.roughness, 1e-4);
+    // float alpha2 = alphag * alphag;
+    float aspect = sqrt(1.0 - 0.9 * mat.anisotropic);
+    float alphax = max(mat.roughness * mat.roughness / aspect, 1e-4);
+    float alphay = max(mat.roughness * mat.roughness * aspect, 1e-4);
+
     float eta = nv > 0 ? mat.IOR : 1.0 / mat.IOR;
 
     float nh = dot(n, h);
@@ -167,8 +172,8 @@ float3 DisneyGlass(float3 n, float3 l, float3 v, float3 h, float nl, float nv, M
     // float Rp = (eta * hv - hl) / (eta * hv + hl);
     // float Fg = (Rs * Rs + Rp * Rp) / 2.0;
     float Fg = DielectricFresnel(hv, eta);
-    float Dg = GGXNDF(nh, alpha2);
-    float Gg = SmithGGXMasking(n, v, alpha2) * SmithGGXMasking(n, l, alpha2);
+    float Dg = GGXNDF(n, h, alphax, alphay);
+    float Gg = SmithGGXMasking(n, v, alphax, alphay) * SmithGGXMasking(n, l, alphax, alphay);
 
     return nv * nl > 0
                ? mat.baseColor * Fg * Dg * Gg / (4.0 * abs(nv))

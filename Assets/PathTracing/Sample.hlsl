@@ -86,17 +86,21 @@ float DielectricFresnel(float hv, float eta)
     return F;
 }
 
-float GGXNDF(float nh, float alpha2)
+float GGXNDF(float3 n, float3 h, float alphax, float alphay)
 {
-    float t = 1 + (alpha2 - 1) * nh * nh;
-    return alpha2 / (PI * t * t);
+    float3 local_h = ToLocal(h, n);
+    float3 h2 = local_h * local_h;
+    float d = h2.x / (alphax * alphax) + h2.y / (alphay * alphay) + h2.z;
+
+    return 1.0 / (PI * alphax * alphay * pow(d, 2.0));
 }
 
-float SmithGGXMasking(float3 n, float3 v, float alpha2)
+float SmithGGXMasking(float3 n, float3 v, float alphax, float alphay)
 {
     float3 local_v = ToLocal(v, n);
     float3 v2 = local_v * local_v;
-    return 2 / (1 + sqrt(1 + (v2.x * alpha2 + v2.y * alpha2) / v2.z));
+    
+    return 2.0 / (1.0 + sqrt(1.0 + (v2.x * alphax * alphax + v2.y * alphay * alphay) / v2.z));
 }
 
 // PDF
@@ -105,12 +109,10 @@ float DiffusePdf(float3 l, float3 n)
     return dot(n, l) / PI;
 }
 
-float MetalPdf(float3 h, float3 n, float3 v, float alphag)
+float MetalPdf(float3 h, float3 n, float3 v, float alphax, float alphay)
 {
-    float alpha2 = alphag * alphag;
-
-    float D = GGXNDF(dot(n, h), alpha2);
-    float G = SmithGGXMasking(n, v, alpha2);
+    float D = GGXNDF(n, h, alphax, alphay);
+    float G = SmithGGXMasking(n, v, alphax, alphay);
 
     return G * D / (4 * abs(dot(n, v)));
 }
@@ -123,7 +125,7 @@ float ClearcoatPdf(float3 h, float3 n, float3 v, float alphagc)
     return (alpha2c - 1.0) * nh / (FOUR_PI * dot(h, v) * log(alpha2c) * (1.0 + (alpha2c - 1.0) * nh * nh));
 }
 
-float GlassPDF(float3 l, float3 n, float3 v, Material mat)
+float GlassPDF(float3 l, float3 n, float3 v, Material mat, float alphax, float alphay)
 {
     float nv = dot(n, v);
     float nl = dot(n, l);
@@ -132,13 +134,10 @@ float GlassPDF(float3 l, float3 n, float3 v, Material mat)
     if (dot(n, h) < 0)
         h = -h;
 
-    float alpha = max(mat.roughness * mat.roughness, 1e-4);
-    float alpha2 = alpha * alpha;
-
     float hv = dot(h, v);
     float F = DielectricFresnel(hv, eta);
-    float D = GGXNDF(dot(n, h), alpha2);
-    float G_in = SmithGGXMasking(n, v, alpha2);
+    float D = GGXNDF(n, h, alphax, alphay);
+    float G_in = SmithGGXMasking(n, v, alphax, alphay);
 
     if (nv * nl > 0)
     {
@@ -190,7 +189,7 @@ float3 CosineWeightedHemisphereSample(inout uint seed, float3 normal)
     return ToWorld(tangentSpaceDir, normal);
 }
 
-float3 SampleVisibleNormals(inout uint seed, float3 local_v, float alpha)
+float3 SampleVisibleNormals(inout uint seed, float3 local_v, float alphax, float alphay)
 {
     float2 rnd_param = float2(RandomFloat(seed), RandomFloat(seed));
     if (local_v.z < 0)
@@ -199,7 +198,7 @@ float3 SampleVisibleNormals(inout uint seed, float3 local_v, float alpha)
     }
 
     float3 hemi_dir_in = normalize(
-        float3(alpha * local_v.x, alpha * local_v.y, local_v.z));
+        float3(alphax * local_v.x, alphay * local_v.y, local_v.z));
 
     float r = sqrt(rnd_param.x);
     float phi = TWO_PI * rnd_param.y;
@@ -211,7 +210,7 @@ float3 SampleVisibleNormals(inout uint seed, float3 local_v, float alpha)
 
     float3 hemi_N = ToWorld(disk_N, hemi_dir_in);
 
-    return normalize(float3(alpha * hemi_N.x, alpha * hemi_N.y, max(0, hemi_N.z)));
+    return normalize(float3(alphax * hemi_N.x, alphay * hemi_N.y, max(0, hemi_N.z)));
 }
 
 float3 ClearcoatSample(inout uint seed, float3 n, float3 v, Material mat, out float3 h)
@@ -228,23 +227,22 @@ float3 ClearcoatSample(inout uint seed, float3 n, float3 v, Material mat, out fl
     return reflect(-v, h);
 }
 
-float3 MetalSample(inout uint seed, float3 n, float3 v, float alphag, out float3 h)
+float3 MetalSample(inout uint seed, float3 n, float3 v, float alphax, float alphay, out float3 h)
 {
     float3 local_v = ToLocal(v, n);
-    h = SampleVisibleNormals(seed, local_v, alphag);
+    h = SampleVisibleNormals(seed, local_v, alphax, alphay);
     h = ToWorld(h, n);
     return reflect(-v, h);
 }
 
-float3 GlassSample(inout uint seed, float3 n, float3 v, Material mat, out float3 h)
+float3 GlassSample(inout uint seed, float3 n, float3 v, Material mat, float alphax, float alphay, out float3 h)
 {
     float nv = dot(n, v);
     float eta = nv > 0 ? mat.IOR : 1.0 / mat.IOR;
 
-    float alpha = mat.roughness * mat.roughness;
     float3 local_v = ToLocal(v, n);
     float3 local_h =
-        SampleVisibleNormals(seed, local_v, alpha);
+        SampleVisibleNormals(seed, local_v, alphax, alphay);
 
     h = ToWorld(local_h, n);
 
@@ -277,26 +275,28 @@ float MultipleImportanceSample(inout uint seed, float3 v, float3 n, Material mat
 {
     float3 h;
 
-    float alphag = max(mat.roughness * mat.roughness, 1e-4);
+    float aspect = sqrt(1.0 - 0.9 * mat.anisotropic);
+    float alphax = max(mat.roughness * mat.roughness / aspect, 1e-4);
+    float alphay = max(mat.roughness * mat.roughness * aspect, 1e-4);
     float alphagc = lerp(0.1, 0.001, mat.clearcoatGloss);
 
     if (dot(n, v) < 0)
     {
-        l = GlassSample(seed, n, v, mat, h);
-        return 1 / GlassPDF(l, n, v, mat);
+        l = GlassSample(seed, n, v, mat, alphax, alphay, h);
+        return 1 / GlassPDF(l, n, v, mat, alphax, alphay);
     }
     else
     {
         float u = RandomFloat(seed);
-    
+
         float sumWeights = 1.0 + (1.0 - mat.metallic) * (1.0 - mat.specularTransmission) + 0.25 * mat.clearcoat;
         float p0 = (1.0 - mat.metallic) * mat.specularTransmission / sumWeights;
         float p1 = 1.0 - mat.metallic / sumWeights;
         float p2 = 1.0 - 0.25 * mat.clearcoat / sumWeights;
-    
+
         if (u < p0)
         {
-            l = GlassSample(seed, n, v, mat, h);
+            l = GlassSample(seed, n, v, mat, alphax, alphay, h);
         }
         else if (u < p1)
         {
@@ -305,14 +305,14 @@ float MultipleImportanceSample(inout uint seed, float3 v, float3 n, Material mat
         }
         else if (u < p2)
         {
-            l = MetalSample(seed, n, v, alphag, h);
+            l = MetalSample(seed, n, v, alphax, alphay, h);
         }
         else
         {
             l = ClearcoatSample(seed, n, v, mat, h);
         }
-        return 1 / (p0 * GlassPDF(l, n, v, mat) + (p1 - p0) * DiffusePdf(l, n) + (p2 - p1) *
-            MetalPdf(h, n, v, alphag) + (1 - p2) * ClearcoatPdf(h, n, v, alphagc));
+        return 1 / (p0 * GlassPDF(l, n, v, mat, alphax, alphay) + (p1 - p0) * DiffusePdf(l, n) + (p2 - p1) *
+            MetalPdf(h, n, v, alphax, alphay) + (1 - p2) * ClearcoatPdf(h, n, v, alphagc));
     }
 
     // float u = RandomFloat(seed);

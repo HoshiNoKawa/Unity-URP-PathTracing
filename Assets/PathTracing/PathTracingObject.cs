@@ -22,7 +22,7 @@ public class PathTracingObject : MonoBehaviour
     [Range(0f, 1f)] public float specular = 0.5f;
     [Range(0f, 1f)] public float specularTint = 0f;
     [Space]
-    [Range(0f, 1f)] public float anisotropic = 0.5f;
+    [Range(0f, 1f)] public float anisotropic = 0f;
     [Space]
     [Range(0f, 1f)] public float sheen = 0.5f;
     [Range(0f, 1f)] public float sheenTint = 0f;

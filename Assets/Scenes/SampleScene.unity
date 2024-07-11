@@ -821,7 +821,7 @@ MonoBehaviour:
   subsurface: 0
   specular: 0
   specularTint: 0
-  anisotropic: 0.5
+  anisotropic: 0
   sheen: 0
   sheenTint: 0
   clearcoat: 0
@@ -952,7 +952,7 @@ MonoBehaviour:
   subsurface: 0.648
   specular: 0.212
   specularTint: 0
-  anisotropic: 0.5
+  anisotropic: 0
   sheen: 0.049
   sheenTint: 0
   clearcoat: 0
@@ -1610,7 +1610,7 @@ MonoBehaviour:
   subsurface: 1
   specular: 0.569
   specularTint: 0
-  anisotropic: 0.5
+  anisotropic: 0
   sheen: 0.732
   sheenTint: 0
   clearcoat: 0.153
@@ -1797,7 +1797,7 @@ MonoBehaviour:
   subsurface: 0
   specular: 0.083
   specularTint: 0
-  anisotropic: 0.5
+  anisotropic: 0
   sheen: 0.153
   sheenTint: 0
   clearcoat: 0.698
