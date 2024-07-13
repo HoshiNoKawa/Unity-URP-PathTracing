@@ -37,7 +37,9 @@ Ray RayWorldToObject(Ray ray, float4x4 nMt)
     Ray transRay;
     float4x4 nM = transpose(nMt);
     transRay.origin = mul(nM, float4(ray.origin, 1)).xyz;
-    transRay.direction = normalize(mul(nM, float4(ray.direction, 0)).xyz);
+    transRay.direction = mul(nM, float4(ray.direction, 0)).xyz;
+    // transRay.direction = normalize(mul(nM, float4(ray.direction, 0)).xyz);
+    transRay.invDir = 1.0 / transRay.direction;
     return transRay;
 }
 
@@ -279,7 +281,7 @@ float MultipleImportanceSample(inout uint seed, float3 v, float3 n, Material mat
     float alphax = max(mat.roughness * mat.roughness / aspect, 1e-4);
     float alphay = max(mat.roughness * mat.roughness * aspect, 1e-4);
     float alphagc = lerp(0.1, 0.001, mat.clearcoatGloss);
-
+    
     if (dot(n, v) < 0)
     {
         l = GlassSample(seed, n, v, mat, alphax, alphay, h);
@@ -288,12 +290,12 @@ float MultipleImportanceSample(inout uint seed, float3 v, float3 n, Material mat
     else
     {
         float u = RandomFloat(seed);
-
+    
         float sumWeights = 1.0 + (1.0 - mat.metallic) * (1.0 - mat.specularTransmission) + 0.25 * mat.clearcoat;
         float p0 = (1.0 - mat.metallic) * mat.specularTransmission / sumWeights;
         float p1 = 1.0 - mat.metallic / sumWeights;
         float p2 = 1.0 - 0.25 * mat.clearcoat / sumWeights;
-
+    
         if (u < p0)
         {
             l = GlassSample(seed, n, v, mat, alphax, alphay, h);

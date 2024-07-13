@@ -13,10 +13,10 @@ public class PathTracingManager : MonoBehaviour
     struct PathTracingMaterial
     {
         public Vector3 Albedo;
+        public Vector3 EmissionColor;
         public float Metallic;
         public float Roughness;
         public int EnableEmission;
-        public Vector3 EmissionColor;
         public float SpecularTransmission;
         public float Subsurface;
         public float Specular;
@@ -27,81 +27,78 @@ public class PathTracingManager : MonoBehaviour
         public float Clearcoat;
         public float ClearcoatGloss;
         public float IOR;
+        public int TextureIndex;
     };
 
     struct Sphere
     {
+        public PathTracingMaterial Mat;
         public Vector3 Center;
         public float Radius;
-        public PathTracingMaterial Mat;
     };
-
-    // struct Triangle
-    // {
-    //     public Vector3 vert0, vert1, vert2;
-    //     public Vector3 normal0, normal1, normal2;
-    // };
 
     struct MeshInfo
     {
-        public int TriangleIndexBegin;
-        public int TriangleIndexEnd;
-        public int PreVertexCount;
-        public int WithoutBV;
-        public Vector3 AABBMin;
-        public Vector3 AABBMax;
+        public PathTracingMaterial Mat;
         public Matrix4x4 WorldMatrix;
         public Matrix4x4 NormalWorldMatrix;
-        public PathTracingMaterial Mat;
+        public int RootNode;
+        public int NodeOffset;
+        public int TriangleOffset;
     };
 
     public ComputeShader rayTracingShader;
 
     public static bool EnablePathTracing = true;
     public bool enablePathTracing = true;
-    
-    [Header("Sky Settings")]
-    public bool useSkybox = true;
+
+    [Header("Sky Settings")] public bool useSkybox = true;
     public Color skyColor = new Color(0.6f, 0.7f, 0.9f);
-    
-    [Header("Stop Condition")]
-    [UnityEngine.Range(1, 20)] public int maxBouncesCount = 5;
+
+    [Header("Stop Condition")] [UnityEngine.Range(1, 20)]
+    public int maxBouncesCount = 5;
+
     public bool useRussianRoulette = false;
     [UnityEngine.Range(0f, 0.95f)] public float russianRouletteProbability = 0.8f;
 
-    [Header("Camera Control")]
-    public bool useCameraController = true;
+    [Header("Camera Control")] public bool useCameraController = true;
     public float moveSpeed = 5.0f;
     public float rotationSpeed = 3.0f;
 
     private ComputeBuffer _sphereBuffer;
-    private ComputeBuffer _vertexBuffer;
-    private ComputeBuffer _normalBuffer;
-    private ComputeBuffer _indexBuffer;
+
+    // private ComputeBuffer _vertexBuffer;
+    // private ComputeBuffer _normalBuffer;
+    // private ComputeBuffer _indexBuffer;
+    private ComputeBuffer _triangleBuffer;
     private ComputeBuffer _meshBuffer;
+    private ComputeBuffer _nodeBuffer;
 
     private List<Sphere> _sphereList;
-    private List<Vector3> _vertexList;
-    private List<Vector3> _normalList;
-    private List<int> _indexList;
-    private List<MeshInfo> _meshList;
 
-    private int _preVertexCount;
+    // private List<Vector3> _vertexList;
+    // private List<Vector3> _normalList;
+    // private List<int> _indexList;
+    private List<PathTracingObject.MeshTriangle> _triangleList;
+    private List<MeshInfo> _meshList;
+    private List<PathTracingObject.BVHNode> _nodeList;
 
     private int _frameCount;
 
     private Transform _mainCamera;
-    
-    private float rotationX = 0.0f;
-    private float rotationY = 0.0f;
+
+    private float _rotationX = 0.0f;
+    private float _rotationY = 0.0f;
 
     void Start()
     {
         _sphereList = new List<Sphere>();
-        _vertexList = new List<Vector3>();
-        _normalList = new List<Vector3>();
-        _indexList = new List<int>();
+        // _vertexList = new List<Vector3>();
+        // _normalList = new List<Vector3>();
+        // _indexList = new List<int>();
+        _triangleList = new List<PathTracingObject.MeshTriangle>();
         _meshList = new List<MeshInfo>();
+        _nodeList = new List<PathTracingObject.BVHNode>();
 
         _frameCount = 0;
 
@@ -109,8 +106,8 @@ public class PathTracingManager : MonoBehaviour
         {
             _mainCamera = Camera.main.transform;
             Vector3 angles = transform.eulerAngles;
-            rotationX = angles.y;
-            rotationY = angles.x;
+            _rotationX = angles.y;
+            _rotationY = angles.x;
         }
 
         rayTracingShader.SetTexture(0, "_SkyBoxTexture", RenderSettings.skybox.GetTexture("_Tex"));
@@ -137,10 +134,12 @@ public class PathTracingManager : MonoBehaviour
     private void OnDestroy()
     {
         _sphereBuffer?.Release();
-        _vertexBuffer?.Release();
-        _normalBuffer?.Release();
-        _indexBuffer?.Release();
+        // _vertexBuffer?.Release();
+        // _normalBuffer?.Release();
+        // _indexBuffer?.Release();
+        _triangleBuffer?.Release();
         _meshBuffer?.Release();
+        _nodeBuffer?.Release();
     }
 
     public void ResetAccumulation()
@@ -164,8 +163,6 @@ public class PathTracingManager : MonoBehaviour
 
     public void ResetScene()
     {
-        _preVertexCount = 0;
-
         foreach (Transform child in transform)
         {
             PathTracingObject properties = child.GetComponent<PathTracingObject>();
@@ -176,7 +173,7 @@ public class PathTracingManager : MonoBehaviour
                 {
                     Material material = properties.GetObjectRenderer().sharedMaterial;
 
-                    PathTracingMaterial sphereMat = new PathTracingMaterial()
+                    PathTracingMaterial sphereMat = new PathTracingMaterial
                     {
                         Albedo = ColorToVector(material.color),
                         Metallic = material.GetFloat("_Metallic"),
@@ -194,7 +191,8 @@ public class PathTracingManager : MonoBehaviour
                         ClearcoatGloss = properties.clearcoatGloss,
                         IOR = properties.indexOfRefraction
                     };
-                    Sphere sphere = new Sphere()
+
+                    Sphere sphere = new Sphere
                     {
                         Center = child.position,
                         Radius = child.localScale.x * 0.5f,
@@ -208,19 +206,29 @@ public class PathTracingManager : MonoBehaviour
 
                 case PathTracingObject.ObjectType.Mesh:
                 {
-                    Mesh mesh = properties.GetObjectMesh().sharedMesh;
+                    properties.BuildBVH();
                     Material[] subMaterials = properties.GetObjectRenderer().sharedMaterials;
+
+
                     Matrix4x4 worldMatrix = child.localToWorldMatrix;
                     Matrix4x4 normalWorldMatrix = child.localToWorldMatrix.inverse.transpose;
 
-                    int indicesCount = _indexList.Count;
-
-                    for (int i = 0; i < mesh.subMeshCount; i++)
+                    for (int i = 0; i < properties.subRootNode.Count; i++)
                     {
-                        SubMeshDescriptor subMesh = mesh.GetSubMesh(i);
                         Material subMaterial = subMaterials[i];
 
-                        PathTracingMaterial meshMat = new PathTracingMaterial()
+                        Texture baseMap = subMaterial.GetTexture("_BaseMap");
+                        if (baseMap)
+                        {
+                            rayTracingShader.SetTexture(0, "Tex0", baseMap);
+                        }
+                        // else
+                        // {
+                        //     rayTracingShader.SetTexture(0, "Tex0", CreateDefaultTexture(subMaterial.color));
+                        // }
+
+
+                        PathTracingMaterial meshMat = new PathTracingMaterial
                         {
                             Albedo = ColorToVector(subMaterial.color),
                             Metallic = subMaterial.GetFloat("_Metallic"),
@@ -236,22 +244,17 @@ public class PathTracingManager : MonoBehaviour
                             SheenTint = properties.sheenTint,
                             Clearcoat = properties.clearcoat,
                             ClearcoatGloss = properties.clearcoatGloss,
-                            IOR = properties.indexOfRefraction
+                            IOR = properties.indexOfRefraction,
+                            TextureIndex = baseMap == null ? 0 : 1
                         };
 
-                        var subMeshBounds = subMesh.bounds;
-
-                        MeshInfo meshInfo = new MeshInfo()
+                        MeshInfo meshInfo = new MeshInfo
                         {
-                            TriangleIndexBegin = indicesCount + subMesh.indexStart,
-                            TriangleIndexEnd = indicesCount + subMesh.indexStart + subMesh.indexCount,
-                            PreVertexCount = _preVertexCount,
-                            WithoutBV = (subMeshBounds.size.x == 0f || subMeshBounds.size.y == 0f ||
-                                         subMeshBounds.size.z == 0f)
-                                ? 1
-                                : 0,
-                            AABBMin = subMeshBounds.min,
-                            AABBMax = subMeshBounds.max,
+                            RootNode = properties.subRootNode[i],
+                            NodeOffset = _nodeList.Count,
+                            TriangleOffset = _triangleList.Count + properties.subTriOffset[i],
+                            // IndexOffset = _indexList.Count,
+                            // VertexOffset = _vertexList.Count,
                             WorldMatrix = worldMatrix,
                             NormalWorldMatrix = normalWorldMatrix,
                             Mat = meshMat
@@ -260,11 +263,11 @@ public class PathTracingManager : MonoBehaviour
                         _meshList.Add(meshInfo);
                     }
 
-                    _vertexList.AddRange(mesh.vertices);
-                    _normalList.AddRange(mesh.normals);
-                    _indexList.AddRange(mesh.triangles);
-
-                    _preVertexCount += mesh.vertexCount;
+                    // _vertexList.AddRange(properties.vertices);
+                    // _normalList.AddRange(properties.normals);
+                    // _indexList.AddRange(properties.indices);
+                    _triangleList.AddRange(properties.triangleList);
+                    _nodeList.AddRange(properties.nodeList);
 
                     break;
                 }
@@ -284,20 +287,26 @@ public class PathTracingManager : MonoBehaviour
 
         if (_meshList.Any())
         {
-            CreateStructuredBuffer(ref _vertexBuffer, _vertexList);
-            CreateStructuredBuffer(ref _normalBuffer, _normalList);
-            CreateStructuredBuffer(ref _indexBuffer, _indexList);
+            // CreateStructuredBuffer(ref _vertexBuffer, _vertexList);
+            // CreateStructuredBuffer(ref _normalBuffer, _normalList);
+            // CreateStructuredBuffer(ref _indexBuffer, _indexList);
+            CreateStructuredBuffer(ref _triangleBuffer, _triangleList);
             CreateStructuredBuffer(ref _meshBuffer, _meshList);
+            CreateStructuredBuffer(ref _nodeBuffer, _nodeList);
 
-            rayTracingShader.SetBuffer(0, "VertexBuffer", _vertexBuffer);
-            rayTracingShader.SetBuffer(0, "NormalBuffer", _normalBuffer);
-            rayTracingShader.SetBuffer(0, "IndexBuffer", _indexBuffer);
+            // rayTracingShader.SetBuffer(0, "VertexBuffer", _vertexBuffer);
+            // rayTracingShader.SetBuffer(0, "NormalBuffer", _normalBuffer);
+            // rayTracingShader.SetBuffer(0, "IndexBuffer", _indexBuffer);
+            rayTracingShader.SetBuffer(0, "TriangleBuffer", _triangleBuffer);
             rayTracingShader.SetBuffer(0, "MeshBuffer", _meshBuffer);
+            rayTracingShader.SetBuffer(0, "BVHNodeBuffer", _nodeBuffer);
 
-            _vertexList.Clear();
-            _normalList.Clear();
-            _indexList.Clear();
+            // _vertexList.Clear();
+            // _normalList.Clear();
+            // _indexList.Clear();
+            _triangleList.Clear();
             _meshList.Clear();
+            _nodeList.Clear();
         }
     }
 
@@ -305,11 +314,11 @@ public class PathTracingManager : MonoBehaviour
     {
         if (Input.GetMouseButton(1))
         {
-            rotationX += Input.GetAxis("Mouse X") * rotationSpeed;
-            rotationY -= Input.GetAxis("Mouse Y") * rotationSpeed;
-            rotationY = Mathf.Clamp(rotationY, -89.9f, 89.9f);
+            _rotationX += Input.GetAxis("Mouse X") * rotationSpeed;
+            _rotationY -= Input.GetAxis("Mouse Y") * rotationSpeed;
+            _rotationY = Mathf.Clamp(_rotationY, -89.9f, 89.9f);
 
-            Quaternion rotation = Quaternion.Euler(rotationY, rotationX, 0);
+            Quaternion rotation = Quaternion.Euler(_rotationY, _rotationX, 0);
             if (_mainCamera.rotation != rotation)
                 ResetAccumulation();
             _mainCamera.rotation = rotation;
@@ -332,7 +341,7 @@ public class PathTracingManager : MonoBehaviour
         Vector3 moveDirection =
             (_mainCamera.forward * moveForward) + (_mainCamera.right * moveRight) + (_mainCamera.up * moveUp);
         _mainCamera.position += moveDirection;
-        
+
         if (moveDirection.magnitude > 0)
             ResetAccumulation();
     }
@@ -355,6 +364,14 @@ public class PathTracingManager : MonoBehaviour
         }
 
         buffer.SetData(data);
+    }
+
+    private Texture CreateDefaultTexture(Color color)
+    {
+        Texture2D defaultTexture = new Texture2D(1, 1);
+        defaultTexture.SetPixel(0, 0, color);
+        defaultTexture.Apply();
+        return defaultTexture;
     }
 }
 

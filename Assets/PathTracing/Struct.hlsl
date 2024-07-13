@@ -5,15 +5,16 @@ struct Ray
 {
     float3 origin;
     float3 direction;
+    float3 invDir;
 };
 
 struct Material
 {
     float3 baseColor;
+    float3 emissionColor;
     float metallic;
     float roughness;
     int enableEmission;
-    float3 emissionColor;
     float specularTransmission;
     float subsurface;
     float specular;
@@ -24,46 +25,55 @@ struct Material
     float clearcoat;
     float clearcoatGloss;
     float IOR;
+    int texIndex;
 };
 
 struct HitPayload
 {
+    Material mat;
     float3 position;
     float3 normal;
+    float2 uv;
     float closestT;
-    Material mat;
+    bool hit;
 };
 
 struct Sphere
 {
+    Material mat;
     float3 center;
     float radius;
-    Material mat;
 };
 
 struct Plane
 {
-    float height;
     Material mat;
+    float height;
 };
 
 struct Triangle
 {
     float3 vert0, vert1, vert2;
     float3 normal0, normal1, normal2;
+    float2 uv0, uv1, uv2;
+};
+
+struct BVHNode
+{
+    float3 AABBMin;
+    float3 AABBMax;
+    int leftChild;
+    int triStart;
 };
 
 struct Mesh
 {
-    uint triangleIndexBegin;
-    uint triangleIndexEnd;
-    uint preVertexCount;
-    int withoutBV;
-    float3 AABBMin;
-    float3 AABBMax;
+    Material mat;
     float4x4 M;
     float4x4 nM;
-    Material mat;
+    int rootNode;
+    int nodeOffset;
+    int triOffset;
 };
 
 float4x4 _CameraToWorld;
@@ -82,23 +92,35 @@ Ray CreateRay(float2 uv)
     return ray;
 }
 
+Material CreateMaterial()
+{
+    Material mat = {
+        float3(0, 0, 0), float3(0, 0, 0), 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0
+    };
+    return mat;
+}
+
 HitPayload CreateHitPayload()
 {
     HitPayload payload;
+    payload.hit = false;
     payload.closestT = FLT_MAX;
     payload.position = 0;
     payload.normal = 0;
+    payload.uv = 0;
+    payload.mat = CreateMaterial();
 
     return payload;
 }
 
-Triangle CreateTriangle(uint3 indices, in StructuredBuffer<float3> VertexBuffer,
-                        in StructuredBuffer<float3> NormalBuffer)
-{
-    Triangle tri = {
-        VertexBuffer[indices.x], VertexBuffer[indices.y], VertexBuffer[indices.z], NormalBuffer[indices.x],
-        NormalBuffer[indices.y], NormalBuffer[indices.z]
-    };
-
-    return tri;
-}
+// Triangle CreateTriangle(uint3 indices, in StructuredBuffer<float3> VertexBuffer,
+//                         in StructuredBuffer<float3> NormalBuffer)
+// {
+//     Triangle tri = {
+//         VertexBuffer[indices.x], VertexBuffer[indices.y], VertexBuffer[indices.z], NormalBuffer[indices.x],
+//         NormalBuffer[indices.y], NormalBuffer[indices.z]
+//     };
+//
+//     return tri;
+// }

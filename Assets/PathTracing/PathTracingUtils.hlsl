@@ -35,7 +35,38 @@ void PlaneIntersection(Plane plane, Ray ray, inout HitPayload payload)
     }
 }
 
-void TriangleIntersection(Triangle tri, Ray ray, inout HitPayload payload, Material mat, float4x4 M, float4x4 nM)
+void TriangleIntersection(Triangle tri, Ray ray, inout HitPayload payload)
+{
+    float3 edge01 = tri.vert1 - tri.vert0;
+    float3 edge02 = tri.vert2 - tri.vert0;
+
+    float3 normalVector = cross(edge01, edge02);
+    float3 ao = ray.origin - tri.vert0;
+    float3 dao = cross(ao, ray.direction);
+
+    float determinant = -dot(ray.direction, normalVector);
+    // if (determinant < 1e-6)
+    //     return;
+
+    float invDet = 1 / determinant;
+    float u = dot(edge02, dao) * invDet;
+    float v = -dot(edge01, dao) * invDet;
+    float w = 1 - u - v;
+    if (u < 0 || v < 0 || w < 0)
+        return;
+
+    float t = dot(ao, normalVector) * invDet;
+
+    if (t > 0.0 && t < payload.closestT)
+    {
+        payload.hit = true;
+        payload.closestT = t;
+        payload.normal = normalize(tri.normal0 * w + tri.normal1 * u + tri.normal2 * v);
+        payload.uv = tri.uv0 * w + tri.uv1 * u + tri.uv2 * v;
+    }
+}
+
+void TriangleIntersection(Triangle tri, Ray ray, inout HitPayload payload, Material mat)
 {
     float3 edge01 = tri.vert1 - tri.vert0;
     float3 edge02 = tri.vert2 - tri.vert0;
@@ -66,6 +97,38 @@ void TriangleIntersection(Triangle tri, Ray ray, inout HitPayload payload, Mater
     }
 }
 
+void TriangleIntersection(Triangle tri, Ray transRay, Ray ray, inout HitPayload payload, Material mat, float4x4 nM)
+{
+    float3 edge01 = tri.vert1 - tri.vert0;
+    float3 edge02 = tri.vert2 - tri.vert0;
+
+    float3 normalVector = cross(edge01, edge02);
+    float3 ao = transRay.origin - tri.vert0;
+    float3 dao = cross(ao, transRay.direction);
+
+    float determinant = -dot(transRay.direction, normalVector);
+    // if (determinant < 1e-8)
+    //     return;
+
+    float invDet = 1 / determinant;
+    float u = dot(edge02, dao) * invDet;
+    float v = -dot(edge01, dao) * invDet;
+    float w = 1 - u - v;
+    if (u < 0 || v < 0 || w < 0)
+        return;
+
+    float t = dot(ao, normalVector) * invDet;
+
+    if (t > 0.0 && t < payload.closestT)
+    {
+        payload.closestT = t;
+        payload.normal = normalize(tri.normal0 * w + tri.normal1 * u + tri.normal2 * v);
+        payload.normal = normalize(mul(nM, float4(payload.normal, 0)).xyz);
+        payload.position = ray.origin + t * ray.direction;
+        payload.mat = mat;
+    }
+}
+
 bool AABBIntersection(float3 AABBMin, float3 AABBMax, Ray ray)
 {
     float3 f = (AABBMax - ray.origin) / ray.direction;
@@ -78,6 +141,70 @@ bool AABBIntersection(float3 AABBMin, float3 AABBMax, Ray ray)
     float t0 = max(tmin.x, max(tmin.y, tmin.z));
 
     return t1 >= t0 ? true : false;
+}
+
+float AABBIntersectionDst(float3 AABBMin, float3 AABBMax, Ray ray)
+{
+    float3 tMin = (AABBMin - ray.origin) * ray.invDir;
+    float3 tMax = (AABBMax - ray.origin) * ray.invDir;
+    float3 t1 = min(tMin, tMax);
+    float3 t2 = max(tMin, tMax);
+    float tNear = max(max(t1.x, t1.y), t1.z);
+    float tFar = min(min(t2.x, t2.y), t2.z);
+
+    bool hit = tFar >= tNear && tFar > 0;
+    float dst = hit ? tNear > 0 ? tNear : 0 : FLT_MAX;
+    return dst;
+};
+
+void AABBIntersection(float3 AABBMin, float3 AABBMax, Ray ray, inout HitPayload payload, Material mat, float4x4 m)
+{
+    float2 t[3];
+    float2 T = float2(-FLT_MAX, FLT_MAX);
+
+    for (int i = 0; i < 3; i++)
+    {
+        if (ray.direction[i] == 0.0)
+        {
+            if (ray.origin[i] > AABBMax[i] || ray.origin[i] < AABBMin[i])
+                return;
+            else
+            {
+                t[i].x = -FLT_MAX;
+                t[i].y = FLT_MAX;
+            }
+        }
+        else
+        {
+            t[i].x = (AABBMin[i] - ray.origin[i]) / ray.direction[i];
+            t[i].y = (AABBMax[i] - ray.origin[i]) / ray.direction[i];
+        }
+
+        T.x = max(T.x, min(t[i].x, t[i].y));
+        T.y = min(T.y, max(t[i].x, t[i].y));
+    }
+
+    if (T.x >= T.y)
+        return;
+
+    if (T.x > 0.0 && T.x < payload.closestT)
+    {
+        payload.closestT = T.x;
+        payload.position = ray.origin + T.x * ray.direction;
+        if (T.x == t[0].x)
+            payload.normal = normalize(mul(m, float4(-1.0, 0.0, 0.0, 0.0)).xyz);
+        if (T.x == t[0].y)
+            payload.normal = normalize(mul(m, float4(1.0, 0.0, 0.0, 0.0)).xyz);
+        if (T.x == t[1].x)
+            payload.normal = normalize(mul(m, float4(0.0, -1.0, 0.0, 0.0)).xyz);
+        if (T.x == t[1].y)
+            payload.normal = normalize(mul(m, float4(0.0, 1.0, 0.0, 0.0)).xyz);
+        if (T.x == t[2].x)
+            payload.normal = normalize(mul(m, float4(0.0, 0.0, -1.0, 0.0)).xyz);
+        if (T.x == t[2].y)
+            payload.normal = normalize(mul(m, float4(0.0, 0.0, 1.0, 0.0)).xyz);
+        payload.mat = mat;
+    }
 }
 
 // BRDF
@@ -164,7 +291,7 @@ float3 DisneyGlass(float3 n, float3 l, float3 v, float3 h, float nl, float nv, M
 
     float eta = nv > 0 ? mat.IOR : 1.0 / mat.IOR;
 
-    float nh = dot(n, h);
+    // float nh = dot(n, h);
     float hv = dot(h, v);
     float hl = dot(h, l);
 
@@ -229,6 +356,8 @@ float3 DisneyBSDF(float3 n, float3 v, float3 l, Material mat)
     float3 disney = (1.0 - mat.specularTransmission) * (1.0 - mat.metallic) * f_diffuse + (1.0 - mat.metallic) * mat.
         sheen * f_sheen + (1.0 - mat.specularTransmission * (1.0 - mat.metallic)) * f_metal + 0.25 * mat.clearcoat *
         f_clearCoat + (1.0 - mat.metallic) * mat.specularTransmission * f_glass;
+
+    // float3 disney = f_diffuse;
 
     // disney *= abs(nl);
     disney = max(0, disney);

@@ -17,17 +17,23 @@ int _bouncesCount;
 float _RR;
 
 StructuredBuffer<Sphere> SphereBuffer;
-StructuredBuffer<float3> VertexBuffer;
-StructuredBuffer<float3> NormalBuffer;
-StructuredBuffer<int> IndexBuffer;
+// StructuredBuffer<float3> VertexBuffer;
+// StructuredBuffer<float3> NormalBuffer;
+// StructuredBuffer<int> IndexBuffer;
+StructuredBuffer<Triangle> TriangleBuffer;
 StructuredBuffer<Mesh> MeshBuffer;
+StructuredBuffer<BVHNode> BVHNodeBuffer;
+
+// Texture2D Tex0[];
+Texture2D Tex0;
+// SamplerState Sampler0;
 
 void TraceRay(Ray ray, inout HitPayload payload)
 {
     uint listCount, stride;
 
     SphereBuffer.GetDimensions(listCount, stride);
-
+    
     for (uint j = 0; j < listCount; j++)
     {
         Sphere sphere = SphereBuffer[j];
@@ -46,26 +52,74 @@ void TraceRay(Ray ray, inout HitPayload payload)
 
     for (uint k = 0; k < listCount; k++)
     {
+        payload.hit = false;
+
         Mesh mesh = MeshBuffer[k];
 
         Ray transRay = RayWorldToObject(ray, mesh.nM);
-        if (mesh.withoutBV || AABBIntersection(mesh.AABBMin, mesh.AABBMax, transRay))
-        // if (AABBIntersection(AABBObjectToWorld(mesh.AABBMin, mesh.M), AABBObjectToWorld(mesh.AABBMax, mesh.M), ray))
+
+        BVHNode node = BVHNodeBuffer[mesh.rootNode + mesh.nodeOffset];
+
+        // node = BVHNodeBuffer[mesh.rootNode+0 + mesh.nodeOffset];
+        //
+        // AABBIntersection(node.AABBMin, node.AABBMax, transRay, payload, mesh.mat, mesh.M);
+        // break;
+
+        if (AABBIntersectionDst(node.AABBMin, node.AABBMax, transRay) >= payload.closestT)
+            continue;
+
+        int nodeStack[32];
+        uint stackTop = 0;
+        nodeStack[stackTop++] = mesh.rootNode + mesh.nodeOffset;
+
+        while (stackTop > 0)
         {
-            for (uint z = mesh.triangleIndexBegin; z < mesh.triangleIndexEnd; z += 3)
+            node = BVHNodeBuffer[nodeStack[--stackTop]];
+
+            if (node.leftChild < 0)
             {
-                // int triIndex = mesh.firstTriangleIndex + z;
-                // Triangle tri = TriangleBuffer[triIndex];
-                uint3 indices = uint3(IndexBuffer[z], IndexBuffer[z + 1], IndexBuffer[z + 2]) + mesh.preVertexCount;
+                // AABBIntersection(node.AABBMin, node.AABBMax, transRay, payload, mesh.mat, mesh.M);
 
-                Triangle tri = {
-                    VertexBuffer[indices.x], VertexBuffer[indices.y], VertexBuffer[indices.z], NormalBuffer[indices.x],
-                    NormalBuffer[indices.y], NormalBuffer[indices.z]
-                };
+                for (int z = node.triStart; z < node.triStart - node.leftChild; z++)
+                {
+                    uint osz = z + mesh.triOffset;
 
-                TriObjectToWorld(tri, mesh.M, mesh.nM);
-                TriangleIntersection(tri, ray, payload, mesh.mat, mesh.M, mesh.nM);
+                    Triangle tri = TriangleBuffer[osz];
+
+                    TriangleIntersection(tri, transRay, payload);
+
+                    // TriObjectToWorld(tri, mesh.M, mesh.nM);
+                    // TriangleIntersection(tri, ray, payload, mesh.mat);
+
+                    // TriangleIntersection(tri, transRay, ray, payload, mesh.mat, mesh.nM);
+                }
             }
+            else
+            {
+                BVHNode leftChild = BVHNodeBuffer[node.leftChild + mesh.nodeOffset];
+                BVHNode rightChild = BVHNodeBuffer[node.leftChild + 1 + mesh.nodeOffset];
+
+                float dstA = AABBIntersectionDst(leftChild.AABBMin, leftChild.AABBMax, transRay);
+                float dstB = AABBIntersectionDst(rightChild.AABBMin, rightChild.AABBMax, transRay);
+
+                bool isNearestA = dstA <= dstB;
+                float dstNear = isNearestA ? dstA : dstB;
+                float dstFar = isNearestA ? dstB : dstA;
+                int childIndexNear = isNearestA ? node.leftChild : node.leftChild + 1;
+                int childIndexFar = isNearestA ? node.leftChild + 1 : node.leftChild;
+
+                if (dstFar < payload.closestT)
+                    nodeStack[stackTop++] = childIndexFar + mesh.nodeOffset;
+                if (dstNear < payload.closestT)
+                    nodeStack[stackTop++] = childIndexNear + mesh.nodeOffset;
+            }
+        }
+
+        if (payload.hit && payload.closestT < FLT_MAX)
+        {
+            payload.normal = normalize(mul(mesh.nM, float4(payload.normal, 0)).xyz);
+            payload.position = ray.origin + payload.closestT * ray.direction;
+            payload.mat = mesh.mat;
         }
     }
 }
@@ -110,7 +164,12 @@ float3 Shade(Ray ray, uint2 id, uint width, uint height)
 
             float3 v = -ray.direction;
 
+
             float mis = MultipleImportanceSample(seed, v, payload.normal, payload.mat, ray.direction);
+
+            if (payload.mat.texIndex)
+                payload.mat.baseColor = Tex0[payload.uv * 2048].rgb;
+            // payload.mat.baseColor = float3(1, 0, 0);
 
             float3 bsdf = DisneyBSDF(payload.normal, v, ray.direction, payload.mat) * max(0, mis);
 
@@ -175,4 +234,5 @@ void CSMain(uint3 id : SV_DispatchThreadID)
         col = lerp(Result[id.xy].rgb, col, 1.0f / _frameCount);
 
     Result[id.xy] = float4(col, 1);
+    // Result[id.xy] = Tex0[id.xy];
 }
