@@ -2,6 +2,8 @@
 
 #pragma multi_compile __ USE_SKYBOX
 #pragma multi_compile __ USE_RR
+#pragma multi_compile __ HAS_SPHERE
+#pragma multi_compile __ HAS_MESH
 
 #include "PathTracingUtils.hlsl"
 
@@ -17,23 +19,27 @@ int _bouncesCount;
 float _RR;
 
 StructuredBuffer<Sphere> SphereBuffer;
-// StructuredBuffer<float3> VertexBuffer;
-// StructuredBuffer<float3> NormalBuffer;
-// StructuredBuffer<int> IndexBuffer;
 StructuredBuffer<Triangle> TriangleBuffer;
 StructuredBuffer<Mesh> MeshBuffer;
 StructuredBuffer<BVHNode> BVHNodeBuffer;
 
-// Texture2D Tex0[];
-Texture2D Tex0;
-// SamplerState Sampler0;
+Texture2D BaseMap;
+Texture2D NormalMap;
+Texture2D ARMMap;
 
+SamplerState sampler_BaseMap;
+SamplerState sampler_NormalMap;
+SamplerState sampler_ARMMap;
+
+// #define HAS_MESH
+// #define HAS_SPHERE
 void TraceRay(Ray ray, inout HitPayload payload)
 {
     uint listCount, stride;
 
+    #ifdef HAS_SPHERE
     SphereBuffer.GetDimensions(listCount, stride);
-    
+
     for (uint j = 0; j < listCount; j++)
     {
         Sphere sphere = SphereBuffer[j];
@@ -42,12 +48,13 @@ void TraceRay(Ray ray, inout HitPayload payload)
         {
             payload.closestT = t;
             payload.position = ray.origin + t * ray.direction;
-            payload.normal = normalize(payload.position - sphere.center);
+            payload.geometricNormal = normalize(payload.position - sphere.center);
             payload.mat = sphere.mat;
-            // payload.inside = false;
         }
     }
+    #endif
 
+    #ifdef HAS_MESH
     MeshBuffer.GetDimensions(listCount, stride);
 
     for (uint k = 0; k < listCount; k++)
@@ -117,11 +124,13 @@ void TraceRay(Ray ray, inout HitPayload payload)
 
         if (payload.hit && payload.closestT < FLT_MAX)
         {
-            payload.normal = normalize(mul(mesh.nM, float4(payload.normal, 0)).xyz);
+            payload.geometricNormal = normalize(mul(mesh.nM, float4(payload.geometricNormal, 0)).xyz);
+            payload.tangent = float4(normalize(mul(mesh.M, float4(payload.tangent.xyz, 0)).xyz), payload.tangent.w);
             payload.position = ray.origin + payload.closestT * ray.direction;
             payload.mat = mesh.mat;
         }
     }
+    #endif
 }
 
 float3 Shade(Ray ray, uint2 id, uint width, uint height)
@@ -165,30 +174,43 @@ float3 Shade(Ray ray, uint2 id, uint width, uint height)
             float3 v = -ray.direction;
 
 
-            float mis = MultipleImportanceSample(seed, v, payload.normal, payload.mat, ray.direction);
-
             if (payload.mat.texIndex)
-                payload.mat.baseColor = Tex0[payload.uv * 2048].rgb;
-            // payload.mat.baseColor = float3(1, 0, 0);
+            {
+                payload.mat.baseColor = BaseMap.SampleLevel(sampler_BaseMap, payload.uv, 0).rgb;
 
-            float3 bsdf = DisneyBSDF(payload.normal, v, ray.direction, payload.mat) * max(0, mis);
+                float3 tbnNormal = normalize(UnpackNormal(NormalMap.SampleLevel(sampler_NormalMap, payload.uv, 0)));
+                payload.shadingNormal = ToWorld(tbnNormal, payload.geometricNormal, payload.tangent);
+                if (dot(payload.shadingNormal, v) * dot(payload.geometricNormal, v) < 0 && abs(dot(payload.shadingNormal, v)) > 0.15)
+                    payload.shadingNormal = -payload.shadingNormal;
+
+                // payload.shadingNormal = payload.geometricNormal;
+
+                float4 arm = ARMMap.SampleLevel(sampler_ARMMap, payload.uv, 0);
+                payload.mat.roughness = arm.g;
+                payload.mat.metallic = arm.b;
+            }
+            else
+            {
+                payload.shadingNormal = payload.geometricNormal;
+            }
+
+            float mis = MultipleImportanceSample(seed, v, payload.shadingNormal, payload.geometricNormal, payload.mat,
+                                                 ray.direction);
+
+            float3 bsdf = DisneyBSDF(payload.shadingNormal, payload.geometricNormal, v, ray.direction, payload.mat) *
+                max(0, mis);
 
             contribution *= bsdf;
 
+            float ngl = dot(payload.geometricNormal, ray.direction);
 
-            // float nv = dot(payload.normal, v);
-            float nl = dot(payload.normal, ray.direction);
-            // float lv = dot(ray.direction, v);
-            // float nh = dot(payload.normal, h);
-            // float hl = dot(h, ray.direction);
-
-            float bias = nl < 0 ? -1e-4 : 1e-4;
-            ray.origin = payload.position + payload.normal * bias;
+            float bias = ngl < 0 ? -1e-4 : 1e-4;
+            ray.origin = payload.position + payload.geometricNormal * bias;
         }
         else
         {
             #ifdef USE_SKYBOX
-            col += _SkyBoxTexture.SampleLevel(sampler_SkyBoxTexture, ray.direction, 0).rgb * contribution;
+            col += clamp(_SkyBoxTexture.SampleLevel(sampler_SkyBoxTexture, ray.direction, 0).rgb, 0, 300) * contribution;
             #else
             col += _skyColor * contribution;
             #endif
@@ -216,23 +238,17 @@ void CSMain(uint3 id : SV_DispatchThreadID)
 
     float2 uv = float2((id.xy + float2(0.5f, 0.5f)) / float2(width, height) * 2.0f - 1.0f);
 
-    // float3 col = 0;
-    // for (int i = -1; i < 2; i += 2)
-    // {
-    //     for (int j = -1; j < 2; j += 2)
-    //     {
-    //         Ray ray = CreateRay(uv + float2(float(i) / width, float(j) / height) * 0.25);
-    //         col += Shade(ray, id.xy, width, height);
-    //     }
-    // }
-    // col /= 4.0;
-
-    Ray ray = CreateRay(uv);
+    // Ray ray = CreateRay(uv);
+    Ray ray = CreateRay(uv + GetSSAABias(16, _frameCount, width, height));
+    // Ray ray = CreateRay(uv + GetJitterBias(_frameCount, width, height));
     float3 col = Shade(ray, id.xy, width, height);
+
+    col = clamp(col, 0, 500);
+    // col = max(col, 0);
 
     if (_cameraType == 1 && _frameCount > 1)
         col = lerp(Result[id.xy].rgb, col, 1.0f / _frameCount);
 
+
     Result[id.xy] = float4(col, 1);
-    // Result[id.xy] = Tex0[id.xy];
 }

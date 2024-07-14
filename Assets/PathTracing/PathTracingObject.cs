@@ -14,16 +14,18 @@ public class PathTracingObject : MonoBehaviour
     }
 
     public ObjectType objectType = ObjectType.Mesh;
-    [Space] [Range(0f, 1f)] public float specularTransmission = 0.5f;
+    [Space] [Range(0f, 1f)] public float specularTransmission = 0f;
     [Range(1f, 2f)] public float indexOfRefraction = 1.5f;
-    [Space] [Range(0f, 1f)] public float subsurface = 0.5f;
+    [Space] [Range(0f, 1f)] public float subsurface = 0f;
     [Space] [Range(0f, 1f)] public float specular = 0.5f;
     [Range(0f, 1f)] public float specularTint = 0f;
     [Space] [Range(0f, 1f)] public float anisotropic = 0f;
-    [Space] [Range(0f, 1f)] public float sheen = 0.5f;
+    [Space] [Range(0f, 1f)] public float sheen = 0f;
     [Range(0f, 1f)] public float sheenTint = 0f;
-    [Space] [Range(0f, 1f)] public float clearcoat = 0.5f;
-    [Range(0f, 1f)] public float clearcoatGloss = 0.5f;
+    [Space] [Range(0f, 1f)] public float clearcoat = 0f;
+    [Range(0f, 1f)] public float clearcoatGloss = 0f;
+
+    [Space] public bool useTextureMapping = false;
 
     private PathTracingManager _pathTracingManager;
     private MeshRenderer _objectRenderer;
@@ -31,14 +33,14 @@ public class PathTracingObject : MonoBehaviour
 
     private Vector3[] vertices;
 
-    // [HideInInspector] public List<int> indices;
     [HideInInspector] public List<int> subRootNode;
     [HideInInspector] public List<int> subTriOffset;
     [HideInInspector] public List<BVHNode> nodeList;
     private List<MeshTriangle> subTriangleList;
     [HideInInspector] public List<MeshTriangle> triangleList;
     private List<BVHTriangleInfo> subTriInfoList;
-    // [HideInInspector] public List<MeshTriangle> sortedTriangleList;
+
+    private bool _hasBuiltedBvh = false;
 
     private const int MaxDepth = 32;
 
@@ -47,7 +49,6 @@ public class PathTracingObject : MonoBehaviour
         _pathTracingManager = transform.parent.GetComponent<PathTracingManager>();
         _objectRenderer = GetComponent<MeshRenderer>();
         _objectMesh = GetComponent<MeshFilter>();
-        // BuildBVH();
     }
 
     private void OnValidate()
@@ -85,6 +86,7 @@ public class PathTracingObject : MonoBehaviour
 
     public struct MeshTriangle
     {
+        public Vector4 TangentA, TangentB, TangentC;
         public Vector3 VertexA, VertexB, VertexC;
         public Vector3 NormalA, NormalB, NormalC;
         public Vector2 UVA, UVB, UVC;
@@ -98,13 +100,21 @@ public class PathTracingObject : MonoBehaviour
 
     public void BuildBVH()
     {
+        if (!_hasBuiltedBvh)
+        {
+            InternalBuildBVH();
+            _hasBuiltedBvh = true;
+        }
+    }
+
+    private void InternalBuildBVH()
+    {
         nodeList = new List<BVHNode>();
         subRootNode = new List<int>();
         subTriOffset = new List<int>();
 
         Mesh mesh = GetObjectMesh().sharedMesh;
         vertices = mesh.vertices;
-        // normals = mesh.normals;
 
         List<int> indexList = new List<int>();
         indexList.AddRange(mesh.triangles);
@@ -159,7 +169,10 @@ public class PathTracingObject : MonoBehaviour
                     NormalC = mesh.normals[indexC],
                     UVA = mesh.uv[indexA],
                     UVB = mesh.uv[indexB],
-                    UVC = mesh.uv[indexC]
+                    UVC = mesh.uv[indexC],
+                    TangentA = mesh.tangents[indexA],
+                    TangentB = mesh.tangents[indexB],
+                    TangentC = mesh.tangents[indexC]
                 };
 
                 subTriangleList.Add(tri);
@@ -179,13 +192,13 @@ public class PathTracingObject : MonoBehaviour
         }
     }
 
-    void Split(int parentIndex, int triStart, int triCount, int depth = 0)
+    private void Split(int nodeIndex, int triStart, int triCount, int depth = 0)
     {
-        BVHNode parent = nodeList[parentIndex];
-        Vector3 size = parent.AABBMax - parent.AABBMin;
+        BVHNode node = nodeList[nodeIndex];
+        Vector3 size = node.AABBMax - node.AABBMin;
         float parentCost = NodeCost(size, triCount);
 
-        (int splitAxis, float splitPos, float cost) = ChooseSplit(parent, triStart, triCount);
+        (int splitAxis, float splitPos, float cost) = ChooseSplit(node, triStart, triCount);
 
         if (cost < parentCost && depth < MaxDepth)
         {
@@ -193,7 +206,7 @@ public class PathTracingObject : MonoBehaviour
             bool leftCreated = false;
             Bounds boundsRight = new Bounds();
             bool rightCreated = false;
-            int numOnLeft = 0;
+            int leftCount = 0;
 
             for (int i = triStart; i < triStart + triCount; i++)
             {
@@ -209,13 +222,13 @@ public class PathTracingObject : MonoBehaviour
                         leftCreated = true;
                     }
 
-                    (subTriInfoList[triStart + numOnLeft], subTriInfoList[i]) =
-                        (subTriInfoList[i], subTriInfoList[triStart + numOnLeft]);
+                    (subTriInfoList[triStart + leftCount], subTriInfoList[i]) =
+                        (subTriInfoList[i], subTriInfoList[triStart + leftCount]);
 
-                    (subTriangleList[triStart + numOnLeft], subTriangleList[i]) = (subTriangleList[i],
-                        subTriangleList[triStart + numOnLeft]);
+                    (subTriangleList[triStart + leftCount], subTriangleList[i]) = (subTriangleList[i],
+                        subTriangleList[triStart + leftCount]);
 
-                    numOnLeft++;
+                    leftCount++;
                 }
                 else
                 {
@@ -240,24 +253,24 @@ public class PathTracingObject : MonoBehaviour
                 AABBMax = boundsRight.max
             };
 
-            parent.LeftChild = nodeList.Count;
+            node.LeftChild = nodeList.Count;
             nodeList.Add(leftChildNode);
             nodeList.Add(rightChildNode);
 
-            nodeList[parentIndex] = parent;
+            nodeList[nodeIndex] = node;
 
-            Split(parent.LeftChild, triStart, numOnLeft, depth + 1);
-            Split(parent.LeftChild + 1, triStart + numOnLeft, triCount - numOnLeft, depth + 1);
+            Split(node.LeftChild, triStart, leftCount, depth + 1);
+            Split(node.LeftChild + 1, triStart + leftCount, triCount - leftCount, depth + 1);
         }
         else
         {
-            parent.TriangleStart = triStart;
-            parent.LeftChild = -triCount;
-            nodeList[parentIndex] = parent;
+            node.TriangleStart = triStart;
+            node.LeftChild = -triCount;
+            nodeList[nodeIndex] = node;
         }
     }
 
-    (int axis, float pos, float cost) ChooseSplit(BVHNode node, int triStart, int triCount)
+    private (int axis, float pos, float cost) ChooseSplit(BVHNode node, int triStart, int triCount)
     {
         if (triCount <= 1)
             return (0, 0, float.PositiveInfinity);
@@ -268,7 +281,6 @@ public class PathTracingObject : MonoBehaviour
 
         float bestCost = float.MaxValue;
 
-        // Estimate best split pos
         for (int axis = 0; axis < 3; axis++)
         {
             for (int i = 0; i < numSplitTests; i++)
@@ -294,8 +306,8 @@ public class PathTracingObject : MonoBehaviour
         bool leftCreated = false;
         Bounds boundsRight = new Bounds();
         bool rightCreated = false;
-        int numOnLeft = 0;
-        int numOnRight = 0;
+        int leftCount = 0;
+        int rightCount = 0;
 
         for (int i = triStart; i < triStart + triCount; i++)
         {
@@ -311,7 +323,7 @@ public class PathTracingObject : MonoBehaviour
                     leftCreated = true;
                 }
 
-                numOnLeft++;
+                leftCount++;
             }
             else
             {
@@ -323,23 +335,22 @@ public class PathTracingObject : MonoBehaviour
                     rightCreated = true;
                 }
 
-                numOnRight++;
+                rightCount++;
             }
         }
 
-        float costA = NodeCost(boundsLeft.size, numOnLeft);
-        float costB = NodeCost(boundsRight.size, numOnRight);
-        return costA + costB;
+        float leftCost = NodeCost(boundsLeft.size, leftCount);
+        float rightCost = NodeCost(boundsRight.size, rightCount);
+        return leftCost + rightCost;
     }
 
-    private float NodeCost(Vector3 size, int numTriangles)
+    private float NodeCost(Vector3 boundSize, int triCount)
     {
-        float halfArea = size.x * size.y + size.y * size.z + size.z * size.x;
-        if (halfArea == 0)
-        {
+        float halfSurfArea = boundSize.x * boundSize.y + boundSize.y * boundSize.z + boundSize.z * boundSize.x;
+        
+        if (halfSurfArea == 0)
             return float.PositiveInfinity;
-        }
 
-        return halfArea * numTriangles;
+        return halfSurfArea * triCount;
     }
 }

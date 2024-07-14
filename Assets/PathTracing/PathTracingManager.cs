@@ -66,19 +66,11 @@ public class PathTracingManager : MonoBehaviour
     public float rotationSpeed = 3.0f;
 
     private ComputeBuffer _sphereBuffer;
-
-    // private ComputeBuffer _vertexBuffer;
-    // private ComputeBuffer _normalBuffer;
-    // private ComputeBuffer _indexBuffer;
     private ComputeBuffer _triangleBuffer;
     private ComputeBuffer _meshBuffer;
     private ComputeBuffer _nodeBuffer;
 
     private List<Sphere> _sphereList;
-
-    // private List<Vector3> _vertexList;
-    // private List<Vector3> _normalList;
-    // private List<int> _indexList;
     private List<PathTracingObject.MeshTriangle> _triangleList;
     private List<MeshInfo> _meshList;
     private List<PathTracingObject.BVHNode> _nodeList;
@@ -93,9 +85,6 @@ public class PathTracingManager : MonoBehaviour
     void Start()
     {
         _sphereList = new List<Sphere>();
-        // _vertexList = new List<Vector3>();
-        // _normalList = new List<Vector3>();
-        // _indexList = new List<int>();
         _triangleList = new List<PathTracingObject.MeshTriangle>();
         _meshList = new List<MeshInfo>();
         _nodeList = new List<PathTracingObject.BVHNode>();
@@ -113,6 +102,7 @@ public class PathTracingManager : MonoBehaviour
         rayTracingShader.SetTexture(0, "_SkyBoxTexture", RenderSettings.skybox.GetTexture("_Tex"));
 
         ResetShaderProperties();
+        ResetObjectCount();
         ResetScene();
     }
 
@@ -159,6 +149,36 @@ public class PathTracingManager : MonoBehaviour
         rayTracingShader.SetKeyword(new LocalKeyword(rayTracingShader, "USE_RR"), useRussianRoulette);
         rayTracingShader.SetFloat("_RR", russianRouletteProbability);
         rayTracingShader.SetInt("_bouncesCount", maxBouncesCount);
+    }
+    
+    public void ResetObjectCount()
+    {
+        int sphereCount = 0, meshCount = 0;
+        foreach (Transform child in transform)
+        {
+            PathTracingObject properties = child.GetComponent<PathTracingObject>();
+
+            switch (properties.objectType)
+            {
+                case PathTracingObject.ObjectType.Sphere:
+                {
+                    sphereCount++;
+                    break;
+                }
+
+                case PathTracingObject.ObjectType.Mesh:
+                {
+                    meshCount++;
+                    break;
+                }
+
+                default:
+                    break;
+            }
+        }
+
+        rayTracingShader.SetKeyword(new LocalKeyword(rayTracingShader, "HAS_SPHERE"), sphereCount > 0);
+        rayTracingShader.SetKeyword(new LocalKeyword(rayTracingShader, "HAS_MESH"), meshCount > 0);
     }
 
     public void ResetScene()
@@ -209,24 +229,23 @@ public class PathTracingManager : MonoBehaviour
                     properties.BuildBVH();
                     Material[] subMaterials = properties.GetObjectRenderer().sharedMaterials;
 
-
                     Matrix4x4 worldMatrix = child.localToWorldMatrix;
                     Matrix4x4 normalWorldMatrix = child.localToWorldMatrix.inverse.transpose;
+
+                    if (properties.useTextureMapping)
+                    {
+                        rayTracingShader.SetTexture(0, "BaseMap", subMaterials[0].GetTexture("_BaseMap"));
+                        rayTracingShader.SetTexture(0, "NormalMap", subMaterials[0].GetTexture("_BumpMap"));
+                        rayTracingShader.SetTexture(0, "ARMMap", subMaterials[0].GetTexture("_MetallicGlossMap"));
+                    }
+                    // else
+                    // {
+                    //     rayTracingShader.SetTexture(0, "Tex0", CreateDefaultTexture(subMaterial.color));
+                    // }
 
                     for (int i = 0; i < properties.subRootNode.Count; i++)
                     {
                         Material subMaterial = subMaterials[i];
-
-                        Texture baseMap = subMaterial.GetTexture("_BaseMap");
-                        if (baseMap)
-                        {
-                            rayTracingShader.SetTexture(0, "Tex0", baseMap);
-                        }
-                        // else
-                        // {
-                        //     rayTracingShader.SetTexture(0, "Tex0", CreateDefaultTexture(subMaterial.color));
-                        // }
-
 
                         PathTracingMaterial meshMat = new PathTracingMaterial
                         {
@@ -245,7 +264,7 @@ public class PathTracingManager : MonoBehaviour
                             Clearcoat = properties.clearcoat,
                             ClearcoatGloss = properties.clearcoatGloss,
                             IOR = properties.indexOfRefraction,
-                            TextureIndex = baseMap == null ? 0 : 1
+                            TextureIndex = properties.useTextureMapping ? 1 : 0
                         };
 
                         MeshInfo meshInfo = new MeshInfo
@@ -253,8 +272,6 @@ public class PathTracingManager : MonoBehaviour
                             RootNode = properties.subRootNode[i],
                             NodeOffset = _nodeList.Count,
                             TriangleOffset = _triangleList.Count + properties.subTriOffset[i],
-                            // IndexOffset = _indexList.Count,
-                            // VertexOffset = _vertexList.Count,
                             WorldMatrix = worldMatrix,
                             NormalWorldMatrix = normalWorldMatrix,
                             Mat = meshMat
@@ -263,9 +280,6 @@ public class PathTracingManager : MonoBehaviour
                         _meshList.Add(meshInfo);
                     }
 
-                    // _vertexList.AddRange(properties.vertices);
-                    // _normalList.AddRange(properties.normals);
-                    // _indexList.AddRange(properties.indices);
                     _triangleList.AddRange(properties.triangleList);
                     _nodeList.AddRange(properties.nodeList);
 
@@ -287,23 +301,14 @@ public class PathTracingManager : MonoBehaviour
 
         if (_meshList.Any())
         {
-            // CreateStructuredBuffer(ref _vertexBuffer, _vertexList);
-            // CreateStructuredBuffer(ref _normalBuffer, _normalList);
-            // CreateStructuredBuffer(ref _indexBuffer, _indexList);
             CreateStructuredBuffer(ref _triangleBuffer, _triangleList);
             CreateStructuredBuffer(ref _meshBuffer, _meshList);
             CreateStructuredBuffer(ref _nodeBuffer, _nodeList);
 
-            // rayTracingShader.SetBuffer(0, "VertexBuffer", _vertexBuffer);
-            // rayTracingShader.SetBuffer(0, "NormalBuffer", _normalBuffer);
-            // rayTracingShader.SetBuffer(0, "IndexBuffer", _indexBuffer);
             rayTracingShader.SetBuffer(0, "TriangleBuffer", _triangleBuffer);
             rayTracingShader.SetBuffer(0, "MeshBuffer", _meshBuffer);
             rayTracingShader.SetBuffer(0, "BVHNodeBuffer", _nodeBuffer);
 
-            // _vertexList.Clear();
-            // _normalList.Clear();
-            // _indexList.Clear();
             _triangleList.Clear();
             _meshList.Clear();
             _nodeList.Clear();
@@ -374,83 +379,3 @@ public class PathTracingManager : MonoBehaviour
         return defaultTexture;
     }
 }
-
-#region deprecatedCode
-
-/*
-{
-    PathTracingMaterial meshMat = new PathTracingMaterial()
-    {
-        Albedo = ColorToVector(objectAttributes.albedo),
-        Metallic = objectAttributes.metallic,
-        Roughness = objectAttributes.roughness,
-        Emission = objectAttributes.emission
-    };
-
-    MeshInfo meshInfo = new MeshInfo()
-    {
-        firstTriangleIndex = _triangleList.Count,
-        mat = meshMat,
-        worldMatrix = child.localToWorldMatrix,
-        normalWorldMatrix = child.localToWorldMatrix.inverse.transpose
-    };
-
-    MeshFilter meshFilter = child.GetComponent<MeshFilter>();
-    Mesh mesh = meshFilter.sharedMesh;
-
-    Vector3[] verts = mesh.vertices;
-    Vector3[] normals = mesh.normals;
-    int[] indices = mesh.triangles;
-
-    Vector3 AABBMin = Vector3.positiveInfinity;
-    Vector3 AABBMax = Vector3.negativeInfinity;
-
-    // Matrix4x4 worldMatrix = child.localToWorldMatrix;
-    // Matrix4x4 normalWorldMatrix = worldMatrix.inverse.transpose;
-
-    for (int i = 0; i < indices.Length; i += 3)
-    {
-        int a = indices[i];
-        int b = indices[i + 1];
-        int c = indices[i + 2];
-
-        Vector3 vert0 = verts[a];
-        Vector3 vert1 = verts[b];
-        Vector3 vert2 = verts[c];
-
-        // Vector3 vert0 = worldMatrix * new Vector4(verts[a].x, verts[a].y, verts[a].z, 1f);
-        // Vector3 vert1 = worldMatrix * new Vector4(verts[b].x, verts[b].y, verts[b].z, 1f);
-        // Vector3 vert2 = worldMatrix * new Vector4(verts[c].x, verts[c].y, verts[c].z, 1f);
-
-        AABBMin.x = Mathf.Min(AABBMin.x, vert0.x, vert1.x, vert2.x);
-        AABBMin.y = Mathf.Min(AABBMin.y, vert0.y, vert1.y, vert2.y);
-        AABBMin.z = Mathf.Min(AABBMin.z, vert0.z, vert1.z, vert2.z);
-
-        AABBMax.x = Mathf.Max(AABBMax.x, vert0.x, vert1.x, vert2.x);
-        AABBMax.y = Mathf.Max(AABBMax.y, vert0.y, vert1.y, vert2.y);
-        AABBMax.z = Mathf.Max(AABBMax.z, vert0.z, vert1.z, vert2.z);
-
-        Vector3 normal0 = normals[a];
-        Vector3 normal1 = normals[b];
-        Vector3 normal2 = normals[c];
-
-        Triangle triangle = new Triangle()
-        {
-            vert0 = vert0, vert1 = vert1, vert2 = vert2, normal0 = normal0, normal1 = normal1,
-            normal2 = normal2
-        };
-
-        _triangleList.Add(triangle);
-    }
-
-    meshInfo.numTriangles = _triangleList.Count - meshInfo.firstTriangleIndex;
-    meshInfo.AABBMin = mesh.bounds.min;
-    meshInfo.AABBMax = mesh.bounds.max;
-
-    _meshList.Add(meshInfo);
-
-    break;
-}
-*/
-
-#endregion

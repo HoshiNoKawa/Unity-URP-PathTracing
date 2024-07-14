@@ -1,4 +1,5 @@
 ﻿#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
 
 // Struct
 struct Ray
@@ -31,8 +32,10 @@ struct Material
 struct HitPayload
 {
     Material mat;
+    float4 tangent;
     float3 position;
-    float3 normal;
+    float3 geometricNormal;
+    float3 shadingNormal;
     float2 uv;
     float closestT;
     bool hit;
@@ -53,6 +56,7 @@ struct Plane
 
 struct Triangle
 {
+    float4 tangent0, tangent1, tangent2;
     float3 vert0, vert1, vert2;
     float3 normal0, normal1, normal2;
     float2 uv0, uv1, uv2;
@@ -107,7 +111,9 @@ HitPayload CreateHitPayload()
     payload.hit = false;
     payload.closestT = FLT_MAX;
     payload.position = 0;
-    payload.normal = 0;
+    payload.geometricNormal = 0;
+    payload.shadingNormal = 0;
+    payload.tangent = 0;
     payload.uv = 0;
     payload.mat = CreateMaterial();
 
