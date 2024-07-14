@@ -1,29 +1,8 @@
 # Unity URP 路径追踪
 
-<style>
-/* 确保容器和图片填满整个页面宽度 */
-.container {
-  width: 100%;
-  display: flex;
-  flex-wrap: wrap; /* 允许内容换行 */
-  justify-content: space-between; /* 在行中平均分配额外的空间 */
-}
-
-/* 设置图片样式，消除间隙，确保两张图片正好占满一行 */
-.img {
-  width: 50%; /* 每张图片占一半宽度 */
-  height: auto; /* 保持图片的原始宽高比 */
-  box-sizing: border-box; /* 边框和内边距的宽度包含在width内 */
-  padding: 0; /* 可以调整此值以添加图片间距 */
-  display: block; /* 避免图片下方的额外空间 */
-}
-</style>
-
 <div class="container">
-  <img class="img" src="images/1720978103025.png">
-  <img class="img" src="images/1720981560300.png">
-  <img class="img" src="images/1720979678428.png">
-  <img class="img" src="images/1720984558896.png">
+  <img src="images/1720978103025.png" width="50%" /><img src="images/1720981560300.png" width="50%" />
+  <img src="images/1720979678428.png" width="50%" /><img src="images/1720984558896.png" width="50%" />
 </div>
 
 ## 使用方法
